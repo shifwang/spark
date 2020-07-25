@@ -140,7 +140,55 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
    *
    * @param input Training data: RDD of `LabeledPoint`
    * @return an unweighted set of trees
+   *
    */
+  def Ares[T: ClassTag](
+      input : Iterator[T],
+      k : Int,
+      weight: Array[Double],
+      seed: Long = Random.nextLong()
+  ) : (Array[T], Long) = {
+      //As a test,assuming weight has same length has input to avoid indexing issues with 1/weight(i)
+      var reservoir_map  = scala.collection.mutable.Map[Double,T]()
+      var i = 0
+      var rand =  new XORShiftRandom(seed)
+      while(i< k && input.hasNext && i<weight.length){
+          val item = input.next()
+          var key = 0.0
+          if(weight(i)!= 0.0){
+            key = scala.math.pow(rand.nextDouble(),1/weight(i))
+            reservoir_map += (key -> item)
+          }
+//           var key = scala.math.pow(rand.nextDouble(),1/weight(i))
+//           reservoir_map += (key -> item)
+          i += 1
+      }
+      //println("Reservoir size after initial k insertions:" + reservoir_map.size)
+      if(i < k){
+          println("Reservoir size if i < k :" + reservoir_map.size)
+          println(reservoir_map.values.toArray.mkString(" "))
+          return (reservoir_map.values.toArray,reservoir_map.values.toArray.length)
+      }
+      else{
+          while(input.hasNext && i < weight.length){
+            val item = input.next()
+            var key1 = 0.0
+            if(weight(i)!= 0.0){
+            key1 = scala.math.pow(rand.nextDouble(),1/weight(i))
+            reservoir_map += (key1 -> item)
+          }
+            if (key1 > reservoir_map.keysIterator.min){
+                reservoir_map -= reservoir_map.keysIterator.min
+                reservoir_map += (key1 -> item)
+            }
+            i+= 1
+          }
+          println("Final Reservoir size  :" + reservoir_map.size)
+          println(reservoir_map.values.toArray.mkString(" "))
+          return (reservoir_map.values.toArray.slice(0,weight.length),weight.length)
+      }
+  }
+
   def run(
       input: RDD[LabeledPoint],
       strategy: OldStrategy,
