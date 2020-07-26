@@ -165,8 +165,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       }
       //println("Reservoir size after initial k insertions:" + reservoir_map.size)
       if(i < k){
-          println("Reservoir size if i < k :" + reservoir_map.size)
-          println(reservoir_map.values.toArray.mkString(" "))
+          //println("Reservoir size if i < k :" + reservoir_map.size)
+          //println(reservoir_map.values.toArray.mkString(" "))
           return (reservoir_map.values.toArray,reservoir_map.values.toArray.length)
       }
       else{
@@ -183,8 +183,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
             }
             i+= 1
           }
-          println("Final Reservoir size  :" + reservoir_map.size)
-          println(reservoir_map.values.toArray.mkString(" "))
+          //println("Final Reservoir size  :" + reservoir_map.size)
+          //println(reservoir_map.values.toArray.mkString(" "))
           return (reservoir_map.values.toArray.slice(0,weight.length),weight.length)
       }
   }

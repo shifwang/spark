@@ -43,7 +43,7 @@ import org.apache.spark.sql.types.StructType
 @Since("1.4.0")
 class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override val uid: String)
   extends Regressor[Vector, WeightedRandomForestRegressor, RandomForestRegressionModel]
-  with RandomForestRegressorParams with DefaultParamsWritable {
+  with WeightedRandomForestRegressorParams with DefaultParamsWritable {
 
   @Since("1.4.0")
   def this() = this(Identifiable.randomUID("wrfr"))
@@ -116,6 +116,9 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
   @Since("3.0.0")
   def setBootstrap(value: Boolean): this.type = set(bootstrap, value)
 
+  @Since("3.1.0")
+  def setFeatureWeight(value: Array[Double]): this.type = set(featureWeight, value)
+
   /** @group setParam */
   @Since("1.4.0")
   def setFeatureSubsetStrategy(value: String): this.type =
@@ -133,7 +136,7 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
 
   override protected def train(
     dataset: Dataset[_]): RandomForestRegressionModel = {
-      train(dataset, Array.fill[Double](2)(1))
+      train(dataset, getFeatureWeight)
   }
       
   protected def train(
