@@ -1373,7 +1373,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       val (treeIndex, node) = nodeStack.head
       // Choose subset of features for node (if subsampling).
       val featureSubset: Option[Array[Int]] = if (metadata.subsamplingFeatures) {
-        Some(reservoirWeightedSampling(
+        Some(Ares(
           Range(0,metadata.numFeatures).iterator,
           metadata.numFeaturesPerNode,
           metadata.featureWeight,
