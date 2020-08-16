@@ -23,6 +23,7 @@ import org.json4s.JsonDSL._
 
 import org.apache.spark.annotation.Since
 import org.apache.spark.ml.linalg.Vector
+import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.tree.DecisionTreeModelReadWrite._
@@ -179,6 +180,11 @@ class DecisionTreeRegressionModel private[ml] (
   override def predict(features: Vector): Double = {
     rootNode.predictImpl(features).prediction
   }
+      
+   def extract_path(): ArrayBuffer[ArrayBuffer[Int]] = 
+      {
+          rootNode.extract_path()
+      }
 
   /** We need to update this function if we ever add other impurity measures. */
   protected def predictVariance(features: Vector): Double = {

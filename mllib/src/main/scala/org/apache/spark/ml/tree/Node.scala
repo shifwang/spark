@@ -19,6 +19,7 @@ package org.apache.spark.ml.tree
 
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
+import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.mllib.tree.model.{ImpurityStats, InformationGainStats => OldInformationGainStats, Node => OldNode, Predict => OldPredict}
 
 /**
@@ -34,6 +35,24 @@ sealed abstract class Node extends Serializable {
 
   /** Impurity measure at this node (for training data) */
   def impurity: Double
+
+  
+
+    
+  def extract_path(): ArrayBuffer[ArrayBuffer[Int]] = {
+      val path = ArrayBuffer[Int]()
+      val all_paths = new ArrayBuffer[ArrayBuffer[Int]]
+      extract_path(path,all_paths)
+  }
+    
+    
+  def extract_path(path: ArrayBuffer[Int], all_paths: ArrayBuffer[ArrayBuffer[Int]]) : ArrayBuffer[ArrayBuffer[Int]]
+    
+    
+
+
+    
+  //def rightChild[ml]: rightChild 
 
   /**
    * Statistics aggregated from training data at this node, used to compute prediction, impurity,
@@ -53,6 +72,7 @@ sealed abstract class Node extends Serializable {
    * E.g., if this is a leaf, returns 0.  If both children are leaves, returns 2.
    */
   private[tree] def numDescendants: Int
+    
 
   /**
    * Recursive print function.
@@ -82,17 +102,19 @@ sealed abstract class Node extends Serializable {
   private[tree] def deepCopy(): Node
 }
 
-private[ml] object Node {
+//private[ml] object[ml] Node 
+  private[ml] object Node{
 
   /**
    * Create a new Node from the old Node format, recursively creating child nodes as needed.
    */
+    
   def fromOld(oldNode: OldNode, categoricalFeatures: Map[Int, Int]): Node = {
     if (oldNode.isLeaf) {
       // TODO: Once the implementation has been moved to this API, then include sufficient
       //       statistics here.
       new LeafNode(prediction = oldNode.predict.predict,
-        impurity = oldNode.impurity, impurityStats = null)
+        impurity = oldNode.impurity,impurityStats = null)
     } else {
       val gain = if (oldNode.stats.nonEmpty) {
         oldNode.stats.get.gain
@@ -116,9 +138,14 @@ class LeafNode private[ml] (
     override val prediction: Double,
     override val impurity: Double,
     override private[ml] val impurityStats: ImpurityCalculator) extends Node {
+    
 
   override def toString: String =
     s"LeafNode(prediction = $prediction, impurity = $impurity)"
+    
+  override def extract_path(path: ArrayBuffer[Int], all_paths : ArrayBuffer[ArrayBuffer[Int]]): ArrayBuffer[ArrayBuffer[Int]] = {
+      return all_paths
+  }
 
   override private[ml] def predictImpl(features: Vector): LeafNode = this
 
@@ -143,7 +170,7 @@ class LeafNode private[ml] (
   override private[ml] def maxSplitFeatureIndex(): Int = -1
 
   override private[tree] def deepCopy(): Node = {
-    new LeafNode(prediction, impurity, impurityStats)
+    new LeafNode(prediction, impurity,impurityStats)
   }
 }
 
@@ -172,7 +199,53 @@ class InternalNode private[ml] (
   override def toString: String = {
     s"InternalNode(prediction = $prediction, impurity = $impurity, split = $split)"
   }
+    
 
+  override def extract_path(path: ArrayBuffer[Int],all_paths: ArrayBuffer[ArrayBuffer[Int]]): ArrayBuffer[ArrayBuffer[Int]] = 
+    {
+        
+        path += split.featureIndex 
+    
+      if(rightChild.numDescendants == 0 & leftChild.numDescendants == 0)
+        {
+            all_paths+= path
+            return all_paths        
+        }
+        
+      if (rightChild.numDescendants != 0 & leftChild.numDescendants == 0)
+        {
+            all_paths += path 
+            var l = path.clone()
+            rightChild.extract_path(l,all_paths)
+        }
+        
+      if (rightChild.numDescendants == 0 & leftChild.numDescendants != 0)
+        {
+            all_paths += path 
+            var l = path.clone()
+            leftChild.extract_path(l,all_paths)
+        }
+      else{
+         
+          var l = path.clone()
+          rightChild.extract_path(l,all_paths)
+          leftChild.extract_path(l,all_paths)
+      }
+    }
+        
+//      
+//         }
+        
+//       else{
+//           rightChild.extract_path(path,all_paths)
+//           leftChild.extract_path(path,all_paths)
+//       }
+    
+ 
+  
+    
+    
+    
   override private[ml] def predictImpl(features: Vector): LeafNode = {
     var node: Node = this
     while (node.isInstanceOf[InternalNode]) {
@@ -305,7 +378,7 @@ private[tree] class LearningNode(
         "Unknown error during Decision Tree learning.  Could not convert LearningNode to Node.")
       (leftChild.get.toNode(prune), rightChild.get.toNode(prune)) match {
         case (l: LeafNode, r: LeafNode) if prune && l.prediction == r.prediction =>
-          new LeafNode(l.prediction, stats.impurity, stats.impurityCalculator)
+          new LeafNode(l.prediction, stats.impurity,stats.impurityCalculator)
         case (l, r) =>
           new InternalNode(stats.impurityCalculator.predict, stats.impurity, stats.gain,
             l, r, split.get, stats.impurityCalculator)
@@ -316,7 +389,7 @@ private[tree] class LearningNode(
           stats.impurityCalculator)
       } else {
         // Here we want to keep same behavior with the old mllib.DecisionTreeModel
-        new LeafNode(stats.impurityCalculator.predict, -1.0, stats.impurityCalculator)
+        new LeafNode(stats.impurityCalculator.predict, -1.0,stats.impurityCalculator)
       }
     }
   }

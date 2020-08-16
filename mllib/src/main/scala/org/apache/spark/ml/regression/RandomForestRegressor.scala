@@ -21,6 +21,7 @@ import org.json4s.{DefaultFormats, JObject}
 import org.json4s.JsonDSL._
 
 import org.apache.spark.annotation.Since
+import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.tree._
@@ -204,7 +205,17 @@ class RandomForestRegressionModel private[ml] (
     this(Identifiable.randomUID("rfr"), trees, numFeatures)
 
   @Since("1.4.0")
-  override def trees: Array[DecisionTreeRegressionModel] = _trees
+  override def trees: Array[DecisionTreeRegressionModel] = _trees 
+      
+  def extract_path(): Array[ArrayBuffer[ArrayBuffer[Int]]] = { 
+      val num_trees = _trees.length
+      var all_tree_paths = new Array[ArrayBuffer[ArrayBuffer[Int]]](num_trees)
+      var i = 0 
+      for (i <- 0 until num_trees){
+          all_tree_paths(i) = _trees(i).extract_path()
+      }
+      return all_tree_paths
+      }
 
   // Note: We may add support for weights (based on tree performance) later on.
   private lazy val _treeWeights: Array[Double] = Array.fill[Double](_trees.length)(1.0)
