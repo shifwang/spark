@@ -202,8 +202,9 @@ class InternalNode private[ml] (
     
 
   override def extract_path(path: ArrayBuffer[Int],all_paths: ArrayBuffer[ArrayBuffer[Int]]): ArrayBuffer[ArrayBuffer[Int]] = 
-    {
-        
+   {
+
+     
         path += split.featureIndex 
     
       if(rightChild.numDescendants == 0 & leftChild.numDescendants == 0)
@@ -212,25 +213,28 @@ class InternalNode private[ml] (
             return all_paths        
         }
         
-      if (rightChild.numDescendants != 0 & leftChild.numDescendants == 0)
+      else if (rightChild.numDescendants == 0 & leftChild.numDescendants != 0)
         {
-            all_paths += path 
-            var l = path.clone()
-            rightChild.extract_path(l,all_paths)
-        }
-        
-      if (rightChild.numDescendants == 0 & leftChild.numDescendants != 0)
-        {
-            all_paths += path 
             var l = path.clone()
             leftChild.extract_path(l,all_paths)
+            all_paths += path 
+
         }
-      else{
-         
+     else if (rightChild.numDescendants != 0 & leftChild.numDescendants != 0)
+       {  
           var l = path.clone()
-          rightChild.extract_path(l,all_paths)
+          var l1 = path.clone()
           leftChild.extract_path(l,all_paths)
+          rightChild.extract_path(l1,all_paths)
       }
+      else 
+        {
+            var l = path.clone()
+            all_paths += path 
+            rightChild.extract_path(l,all_paths)
+
+        }
+     
     }
         
 //      

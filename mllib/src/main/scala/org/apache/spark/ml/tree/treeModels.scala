@@ -26,6 +26,7 @@ import org.json4s.jackson.JsonMethods._
 import org.apache.spark.ml.attribute._
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.param.{Param, Params}
+import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.ml.tree.DecisionTreeModelReadWrite.NodeData
 import org.apache.spark.ml.util.{DefaultParamsReader, DefaultParamsWriter}
 import org.apache.spark.ml.util.DefaultParamsReader.Metadata
@@ -48,6 +49,9 @@ private[spark] trait DecisionTreeModel {
     1 + rootNode.numDescendants
   }
 
+  def get_paths(): ArrayBuffer[ArrayBuffer[Int]] = {
+      rootNode.extract_path()
+  }
   /**
    * Depth of the tree.
    * E.g.: Depth 0 means 1 leaf node.  Depth 1 means 1 internal node and 2 leaf nodes.
