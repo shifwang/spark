@@ -8,8 +8,9 @@ def findInteraction(rfModel:RandomForestRegressionModel, threshold: Double): Dat
     val paths = rfModel.extract_path
                 .map(_.map(_.toList.distinct).toList)
                 .reduce((x, y) => x++y)
+    val total = paths.map(x => math.pow(2, - x.length)).sum
     val occurences = paths.map(x => {
-        val z = new PoissonSampler(paths.length * math.pow(2, -x.length))
+        val z = new PoissonSampler(paths.length * math.pow(2, -x.length) / total)
         z.sample()
     })
     
