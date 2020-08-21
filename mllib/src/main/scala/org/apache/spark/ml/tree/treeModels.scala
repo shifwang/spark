@@ -49,7 +49,7 @@ private[spark] trait DecisionTreeModel {
     1 + rootNode.numDescendants
   }
 
-  def get_paths(): ArrayBuffer[ArrayBuffer[Int]] = {
+  def get_paths(): Array[Array[Int]] = {
       rootNode.extract_path()
   }
   /**

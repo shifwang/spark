@@ -39,14 +39,14 @@ sealed abstract class Node extends Serializable {
   
 
     
-  def extract_path(): ArrayBuffer[ArrayBuffer[Int]] = {
-      val path = ArrayBuffer[Int]()
-      val all_paths = new ArrayBuffer[ArrayBuffer[Int]]
-      extract_path(path,all_paths)
+  def extract_path(): Array[Array[Int]] = {
+      val path = new Array[Int](0)
+      val all_paths = new ArrayBuffer[Array[Int]]
+      return extract_path(path,all_paths).toArray
   }
     
     
-  def extract_path(path: ArrayBuffer[Int], all_paths: ArrayBuffer[ArrayBuffer[Int]]) : ArrayBuffer[ArrayBuffer[Int]]
+  def extract_path(path: Array[Int], all_paths: ArrayBuffer[Array[Int]]) : ArrayBuffer[Array[Int]]
     
     
 
@@ -143,7 +143,7 @@ class LeafNode private[ml] (
   override def toString: String =
     s"LeafNode(prediction = $prediction, impurity = $impurity)"
     
-  override def extract_path(path: ArrayBuffer[Int], all_paths : ArrayBuffer[ArrayBuffer[Int]]): ArrayBuffer[ArrayBuffer[Int]] = {
+  override def extract_path(path: Array[Int], all_paths : ArrayBuffer[Array[Int]]): ArrayBuffer[Array[Int]] = {
       return all_paths
   }
 
@@ -201,38 +201,44 @@ class InternalNode private[ml] (
   }
     
 
-  override def extract_path(path: ArrayBuffer[Int],all_paths: ArrayBuffer[ArrayBuffer[Int]]): ArrayBuffer[ArrayBuffer[Int]] = 
+  override def extract_path(path: Array[Int],all_paths: ArrayBuffer[Array[Int]]): ArrayBuffer[Array[Int]] = 
    {
 
-     
-        path += split.featureIndex 
     
+        var current_path = new Array[Int](path.size+1)
+        System.arraycopy(path,0,current_path,0,path.size)
+        current_path(path.size) = split.featureIndex   
+       
       if(rightChild.numDescendants == 0 & leftChild.numDescendants == 0)
-        {
-            all_paths+= path
+      {
+//             var current_all_paths = new Array[Array[Int]](all_paths.size+1)
+//             System.arraycopy(all_paths,0,current_all_paths,0,all_paths.size)
+//             current_all_paths(all_paths.size) = current_path    
+            all_paths += current_path 
             return all_paths        
         }
         
       else if (rightChild.numDescendants == 0 & leftChild.numDescendants != 0)
         {
-            var l = path.clone()
-            leftChild.extract_path(l,all_paths)
-            all_paths += path 
+            //var l = path.clone()
+//             var current_all_paths = new Array[Array[Int]](all_paths.size+1)
+//             System.arraycopy(all_paths,0,current_all_paths,0,all_paths.size)
+//             current_all_paths(all_paths.size) = current_path    
+            leftChild.extract_path(current_path,all_paths)
+            all_paths += current_path
+            
 
         }
      else if (rightChild.numDescendants != 0 & leftChild.numDescendants != 0)
        {  
-          var l = path.clone()
-          var l1 = path.clone()
-          leftChild.extract_path(l,all_paths)
-          rightChild.extract_path(l1,all_paths)
+         // var l = path.clone()
+          leftChild.extract_path(current_path,all_paths)
+          rightChild.extract_path(current_path,all_paths)
       }
       else 
         {
-            var l = path.clone()
-            all_paths += path 
-            rightChild.extract_path(l,all_paths)
-
+            all_paths += current_path 
+            rightChild.extract_path(current_path,all_paths)
         }
      
     }

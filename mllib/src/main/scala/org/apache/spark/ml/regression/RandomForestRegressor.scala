@@ -207,9 +207,9 @@ class RandomForestRegressionModel private[ml] (
   @Since("1.4.0")
   override def trees: Array[DecisionTreeRegressionModel] = _trees 
       
-  def extract_path(): Array[ArrayBuffer[ArrayBuffer[Int]]] = { 
+  def extract_path(): Array[Array[Array[Int]]] = { 
       val num_trees = _trees.length
-      var all_tree_paths = new Array[ArrayBuffer[ArrayBuffer[Int]]](num_trees)
+      var all_tree_paths = new Array[Array[Array[Int]]](num_trees)
       var i = 0 
       for (i <- 0 until num_trees){
           all_tree_paths(i) = _trees(i).extract_path()

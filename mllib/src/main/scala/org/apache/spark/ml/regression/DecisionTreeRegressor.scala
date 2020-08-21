@@ -181,7 +181,7 @@ class DecisionTreeRegressionModel private[ml] (
     rootNode.predictImpl(features).prediction
   }
       
-   def extract_path(): ArrayBuffer[ArrayBuffer[Int]] = 
+   def extract_path(): Array[Array[Int]] = 
       {
           rootNode.extract_path()
       }
