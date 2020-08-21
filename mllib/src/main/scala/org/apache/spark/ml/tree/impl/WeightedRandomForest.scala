@@ -195,11 +195,12 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String,
       featureWeight: Array[Double],
+      numIteration: Int,
       seed: Long): Array[DecisionTreeModel] = {
     val instances = input.map { case LabeledPoint(label, features) =>
       Instance(label, 1.0, features.asML)
     }
-    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, seed, None)
+    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, seed, None)
   }
 
   /**
@@ -217,7 +218,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       strategy: OldStrategy,
       numTrees: Int,
       featureSubsetStrategy: String,
-      featureWeight: Array[Double],
       seed: Long,
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
@@ -367,6 +367,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String,
       featureWeight: Array[Double],
+      numIteration: Int,
       seed: Long,
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
@@ -401,9 +402,17 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       .persist(StorageLevel.MEMORY_AND_DISK)
       .setName("bagged tree points")
 
+    var runningWeight = if (featureWeight.length != metadata.numFeatures) {Array.fill(metadata.numFeatures)(1.0)} else {featureWeight}
+    for (iter <- 0 until numIteration - 1) {
+        metadata.featureWeight = runningWeight
+        val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
+          strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy,
+          seed = seed, instr = instr, prune = prune, parentUID = parentUID)
+        runningWeight = TreeEnsembleModel.featureImportances(trees, metadata.numFeatures, true).toArray
+    }
     val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
       strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy,
-      featureWeight=featureWeight, seed = seed, instr = instr, prune = prune, parentUID = parentUID)
+      seed = seed, instr = instr, prune = prune, parentUID = parentUID)
 
     baggedInput.unpersist()
     bcSplits.destroy()

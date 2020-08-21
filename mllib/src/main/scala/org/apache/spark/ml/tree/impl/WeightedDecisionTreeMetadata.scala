@@ -60,7 +60,7 @@ private[spark] class WeightedDecisionTreeMetadata(
     minInfoGain: Double,
     numTrees: Int,
     numFeaturesPerNode: Int,
-    val featureWeight: Array[Double]) extends impl.DecisionTreeMetadata(
+    var featureWeight: Array[Double]) extends impl.DecisionTreeMetadata(
       numFeatures,
       numExamples,
       weightedNumExamples,

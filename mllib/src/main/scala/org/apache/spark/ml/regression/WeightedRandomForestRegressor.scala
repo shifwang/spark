@@ -119,6 +119,9 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
   @Since("3.1.0")
   def setFeatureWeight(value: Array[Double]): this.type = set(featureWeight, value)
 
+  @Since("3.1.0")
+  def setNumIteration(value: Int): this.type = set(numIteration, value)
+
   /** @group setParam */
   @Since("1.4.0")
   def setFeatureSubsetStrategy(value: String): this.type =
@@ -134,13 +137,8 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
   @Since("3.0.0")
   def setWeightCol(value: String): this.type = set(weightCol, value)
 
-  override protected def train(
-    dataset: Dataset[_]): RandomForestRegressionModel = {
-      train(dataset, getFeatureWeight)
-  }
-      
   protected def train(
-      dataset: Dataset[_], featureWeight: Array[Double]): RandomForestRegressionModel = instrumented { instr =>
+      dataset: Dataset[_]): RandomForestRegressionModel = instrumented { instr =>
     val categoricalFeatures: Map[Int, Int] =
       MetadataUtils.getCategoricalFeatures(dataset.schema($(featuresCol)))
 
@@ -157,7 +155,7 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
       checkpointInterval, bootstrap)
 
     val trees = WeightedRandomForest
-      .run(instances, strategy, getNumTrees, getFeatureSubsetStrategy, featureWeight, getSeed, Some(instr))
+      .run(instances, strategy, getNumTrees, getFeatureSubsetStrategy, getFeatureWeight, getNumIteration, getSeed, Some(instr))
       .map(_.asInstanceOf[DecisionTreeRegressionModel])
     trees.foreach(copyValues(_))
 

@@ -35,11 +35,17 @@ private[ml] trait WeightedRandomForestParams extends RandomForestParams {
     new DoubleArrayParam(this, "featureWeight", "The probability of selecting each feature when selecting candidate features",
       _.forall(x => x >= 0))
 
-  setDefault(featureWeight -> Array.fill[Double](1)(1.0))
+  setDefault(featureWeight -> Array.fill[Double](0)(1.0))
 
   /** @group getParam */
   final def getFeatureWeight: Array[Double] = $(featureWeight)
 
+  final val numIteration: IntParam =
+    new IntParam(this, "numIteration", "The number of iterations for reweighted RF training", _ >= 1)
+
+  setDefault(numIteration -> 1)
+  /** @group getParam */
+  final def getNumIteration: Int = $(numIteration)
 }
 
 private[ml] trait WeightedRandomForestClassifierParams
