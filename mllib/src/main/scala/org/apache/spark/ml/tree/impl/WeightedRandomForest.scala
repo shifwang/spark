@@ -403,16 +403,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       .setName("bagged tree points")
 
     var runningWeight = if (featureWeight.length != metadata.numFeatures) {Array.fill(metadata.numFeatures)(1.0)} else {featureWeight}
-    for (iter <- 0 until numIteration - 1) {
+    for (iter <- 0 until numIteration) {
         metadata.featureWeight = runningWeight
         val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
           strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy,
           seed = seed, instr = instr, prune = prune, parentUID = parentUID)
         runningWeight = TreeEnsembleModel.featureImportances(trees, metadata.numFeatures, true).toArray
     }
-    val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy,
-      seed = seed, instr = instr, prune = prune, parentUID = parentUID)
 
     baggedInput.unpersist()
     bcSplits.destroy()
