@@ -46,6 +46,16 @@ private[ml] trait WeightedRandomForestParams extends RandomForestParams {
   setDefault(numIteration -> 1)
   /** @group getParam */
   final def getNumIteration: Int = $(numIteration)
+    
+    
+  final val dataSubSamplingRate: DoubleArrayParam =
+    new DoubleArrayParam(this, "dataSubSamplingRate", "The data sub-sampling rate is ", _.forall(x => x >= 0))
+
+  setDefault(dataSubSamplingRate -> Array.fill[Double](0)(1.0))
+  /** @group getParam */
+  final def getDataSubSamplingRate: Array[Double] = $(dataSubSamplingRate)
+    
+    
 }
 
 private[ml] trait WeightedRandomForestClassifierParams

@@ -151,11 +151,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       //As a test,assuming weight has same length has input to avoid indexing issues with 1/weight(i)
       var reservoir_map  = scala.collection.mutable.Map[Double,T]()
       var i = 0
+      var all_zero = 1
       var rand =  new XORShiftRandom(seed)
       while(i< k && input.hasNext && i<weight.length){
           val item = input.next()
           var key = 0.0
           if(weight(i)!= 0.0){
+            all_zero = 0
             key = scala.math.pow(rand.nextDouble(),1/weight(i))
             reservoir_map += (key -> item)
           }
@@ -174,18 +176,28 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
             val item = input.next()
             var key1 = 0.0
             if(weight(i)!= 0.0){
+            all_zero = 0
             key1 = scala.math.pow(rand.nextDouble(),1/weight(i))
             reservoir_map += (key1 -> item)
-          }
-            if (key1 > reservoir_map.keysIterator.min){
+             if (key1 > reservoir_map.keysIterator.min){
                 reservoir_map -= reservoir_map.keysIterator.min
                 reservoir_map += (key1 -> item)
             }
+          }
+            //if (key1 > reservoir_map.keysIterator.min &&  key1 > 0.0){
+             //   reservoir_map -= reservoir_map.keysIterator.min
+              //  reservoir_map += (key1 -> item)
+            //}
             i+= 1
           }
           //println("Final Reservoir size  :" + reservoir_map.size)
           //println(reservoir_map.values.toArray.mkString(" "))
+          //if(all_zero == 1){
+           //   return (reservoirWeightedSampling(input,k,weight,seed))
+          //}
+         // else{
           return (reservoir_map.values.toArray.slice(0,weight.length),weight.length)
+          //}
       }
   }
 
@@ -195,12 +207,12 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String,
       featureWeight: Array[Double],
-      numIteration: Int,
+      numIteration: Int, dataSubSamplingRate : Array[Double], 
       seed: Long): Array[DecisionTreeModel] = {
     val instances = input.map { case LabeledPoint(label, features) =>
       Instance(label, 1.0, features.asML)
     }
-    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, seed, None)
+    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, None)
   }
 
   /**
@@ -217,7 +229,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       bcSplits: Broadcast[Array[Array[Split]]],
       strategy: OldStrategy,
       numTrees: Int,
-      featureSubsetStrategy: String,
+      featureSubsetStrategy: String, 
+      dataSubSamplingRate: Double, 
       seed: Long,
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
@@ -307,7 +320,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       // Choose node splits, and enqueue new nodes as needed.
       timer.start("findBestSplits")
       val bestSplit = WeightedRandomForest.findBestSplits(baggedInput, metadata, topNodesForGroup,
-        nodesForGroup, treeToNodeToIndexInfo, bcSplits, nodeStack, timer, nodeIds,
+        nodesForGroup, treeToNodeToIndexInfo, bcSplits, nodeStack, timer, nodeIds, dataSubSamplingRate, rng, 
         outputBestSplits = strategy.useNodeIdCache)
       if (strategy.useNodeIdCache) {
         nodeIds = updateNodeIds(baggedInput, nodeIds, bcSplits, bestSplit)
@@ -367,7 +380,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String,
       featureWeight: Array[Double],
-      numIteration: Int,
+      numIteration: Int, 
+      dataSubSamplingRate : Array[Double], 
       seed: Long,
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
@@ -406,13 +420,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     for (iter <- 0 until numIteration - 1) {
         metadata.featureWeight = runningWeight
         val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-          strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy,
+          strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), 
           seed = seed, instr = instr, prune = prune, parentUID = parentUID)
         runningWeight = TreeEnsembleModel.featureImportances(trees, metadata.numFeatures, true).toArray
     }
     metadata.featureWeight = runningWeight
     val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy,
+      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, 
       seed = seed, instr = instr, prune = prune, parentUID = parentUID)
 
     baggedInput.unpersist()
@@ -430,9 +444,12 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       bcSplits: Broadcast[Array[Array[Split]]],
       bestSplits: Array[Map[Int, Split]]): RDD[Array[Int]] = {
     require(nodeIds != null && bestSplits != null)
+    //println(nodeIds.take(input.count().toInt).foreach(x => println(x(0))))
     input.zip(nodeIds).map { case (point, ids) =>
+      //println("in map")
       var treeId = 0
       while (treeId < bestSplits.length) {
+        //println("while loop entered")
         val bestSplitsInTree = bestSplits(treeId)
         if (bestSplitsInTree != null) {
           val nodeId = ids(treeId)
@@ -449,6 +466,9 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         }
         treeId += 1
       }
+      //nodeIds.foreach(println)
+      //ids.foreach(println)
+      //println(ids.collect().foreach(arr => println(arr.toList)))
       ids
     }
   }
@@ -584,6 +604,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       nodeStack: mutable.ListBuffer[(Int, LearningNode)],
       timer: TimeTracker = new TimeTracker,
       nodeIds: RDD[Array[Int]] = null,
+      dataSubSamplingRate: Double, 
+      rng : Random, 
       outputBestSplits: Boolean = false): Array[Map[Int, Split]] = {
 
     /*
@@ -668,13 +690,18 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     def binSeqOp(
         agg: Array[DTStatsAggregator],
         baggedPoint: BaggedPoint[TreePoint],
-        splits: Array[Array[Split]]): Array[DTStatsAggregator] = {
+        splits: Array[Array[Split]],
+        dataSubSamplingRate : Double,
+        seed: Long): Array[DTStatsAggregator] = {
+        val subsampleRand = new XORShiftRandom(seed)
+        val a = subsampleRand.nextDouble()
+        if(a < dataSubSamplingRate){
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
         val nodeIndex =
           topNodesForGroup(treeIndex).predictImpl(baggedPoint.datum.binnedFeatures, splits)
         nodeBinSeqOp(treeIndex, nodeIndexToInfo.getOrElse(nodeIndex, null),
           agg, baggedPoint, splits)
-      }
+      }}
       agg
     }
 
@@ -683,15 +710,21 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
      */
     def binSeqOpWithNodeIdCache(
         agg: Array[DTStatsAggregator],
-        dataPoint: (BaggedPoint[TreePoint], Array[Int]),
-        splits: Array[Array[Split]]): Array[DTStatsAggregator] = {
+        dataPoint: (BaggedPoint[TreePoint], Array[Int]), 
+        splits: Array[Array[Split]],
+        dataSubSamplingRate : Double, 
+        seed: Long ): Array[DTStatsAggregator] = {
+        val subsampleRand = new XORShiftRandom(seed)
+        val a = subsampleRand.nextDouble()
+        println(a)
+        if(a < dataSubSamplingRate){
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
         val baggedPoint = dataPoint._1
         val nodeIdCache = dataPoint._2
         val nodeIndex = nodeIdCache(treeIndex)
         nodeBinSeqOp(treeIndex, nodeIndexToInfo.getOrElse(nodeIndex, null),
           agg, baggedPoint, splits)
-      }
+      }}
       agg
     }
 
@@ -737,7 +770,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
 
     val partitionAggregates = if (useNodeIdCache) {
 
-      input.zip(nodeIds).mapPartitions { points =>
+      input.zip(nodeIds).mapPartitionsWithIndex{ (pID,points) =>
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
         val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
@@ -746,16 +779,18 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           }
           new DTStatsAggregator(metadata, featuresForNode)
         }
+          
 
         // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators, _, bcSplits.value))
-
+        //points.zipWithIndex.foreach((point,i) => binSeqOpWithNodeIdCache(nodeStatsAggregators, _, bcSplits.value, dataSubSamplingRate, rng.nextLong()+pID.toLong + i.toLong))
+        //points.zipWithIndex.foreach{x => println("Partition ID is: " + pID.toString + "  point ID is: " + x._2.toString + "randon number: " + (rng.nextLong()+pID.toLong).toString)}
+        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value, dataSubSamplingRate, rng.nextLong()+pID.toLong))
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
         nodeStatsAggregators.iterator.zipWithIndex.map(_.swap)
       }
     } else {
-      input.mapPartitions { points =>
+      input.mapPartitionsWithIndex { (pID,points) =>
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
         val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
@@ -766,7 +801,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         }
 
         // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOp(nodeStatsAggregators, _, bcSplits.value))
+        points.foreach(binSeqOp(nodeStatsAggregators, _, bcSplits.value,dataSubSamplingRate, rng.nextLong()+pID.toLong))
 
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
@@ -780,7 +815,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           Some(nodeToFeatures(nodeIndex))
         }
 
-        // find best split for each node
+        // find best split for eaalculateh node
         val (split: Split, stats: ImpurityStats) =
           binsToBestSplit(aggStats, bcSplits.value, featuresForNode, nodes(nodeIndex))
         (nodeIndex, (split, stats))
@@ -1383,11 +1418,20 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       val (treeIndex, node) = nodeStack.head
       // Choose subset of features for node (if subsampling).
       val featureSubset: Option[Array[Int]] = if (metadata.subsamplingFeatures) {
-        Some(Ares(
+          if(metadata.featureWeight.reduceLeft(_ max _) == 0.0){ 
+              Some(reservoirWeightedSampling(    
+                  Range(0,metadata.numFeatures).iterator,
+                  metadata.numFeaturesPerNode,
+                  metadata.featureWeight,
+                  rng.nextLong())._1)
+              }
+          else{
+          //a.reduceLeft(_ max _)
+        Some(Ares(    
           Range(0,metadata.numFeatures).iterator,
           metadata.numFeaturesPerNode,
           metadata.featureWeight,
-          rng.nextLong())._1)
+          rng.nextLong())._1)}
       } else {
         None
       }

@@ -121,6 +121,10 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
 
   @Since("3.1.0")
   def setNumIteration(value: Int): this.type = set(numIteration, value)
+      
+  @Since("3.1.0")
+  def setDataSubSamplingRate(value: Array[Double]): this.type = set(dataSubSamplingRate, value)
+
 
   /** @group setParam */
   @Since("1.4.0")
@@ -155,7 +159,7 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
       checkpointInterval, bootstrap)
 
     val trees = WeightedRandomForest
-      .run(instances, strategy, getNumTrees, getFeatureSubsetStrategy, getFeatureWeight, getNumIteration, getSeed, Some(instr))
+      .run(instances, strategy, getNumTrees, getFeatureSubsetStrategy, getFeatureWeight, getNumIteration, getDataSubSamplingRate, getSeed, Some(instr))
       .map(_.asInstanceOf[DecisionTreeRegressionModel])
     trees.foreach(copyValues(_))
 
