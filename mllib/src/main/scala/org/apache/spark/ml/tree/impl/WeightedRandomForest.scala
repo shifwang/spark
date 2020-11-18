@@ -30,8 +30,10 @@ import org.apache.spark.ml.regression.DecisionTreeRegressionModel
 import org.apache.spark.ml.tree._
 import org.apache.spark.ml.util.Instrumentation
 import org.apache.spark.mllib.regression.LabeledPoint
+import org.apache.spark.ml.tree.impl.TreePoint
 import org.apache.spark.mllib.tree.configuration.{Algo => OldAlgo, Strategy => OldStrategy}
 import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
+import org.apache.spark.mllib.tree.impurity.VarianceCalculator
 import org.apache.spark.mllib.tree.model.ImpurityStats
 import org.apache.spark.rdd.RDD
 import org.apache.spark.rdd.util.PeriodicRDDCheckpointer
@@ -135,13 +137,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       (reservoir.slice(0, weight.length), weight.length)
       }
   }
-  /**
-   * Train a random forest.
-   *
-   * @param input Training data: RDD of `LabeledPoint`
-   * @return an unweighted set of trees
-   *
-   */
+  
   def Ares[T: ClassTag](
       input : Iterator[T],
       k : Int,
@@ -200,7 +196,31 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           //}
       }
   }
-
+ 
+  def updateLeafStats(nodeAgg : Array[Array[Double]], 
+                      dataPoint: Instance, topNodes : Array[LearningNode], 
+                      numTrees : Int) :  Array[Array[Double]] = {
+      var offset = 0
+      
+      for (treeIndex <- 0 until numTrees) {
+          offset = topNodes(treeIndex).getLeafIndex(dataPoint.features)
+          //println(s"For tree = $treeIndex")
+          //println(s"leafIndex is = $offset")
+          nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
+          nodeAgg(treeIndex)(offset*3 + 1) += dataPoint.label //update label sum 
+          nodeAgg(treeIndex)(offset*3 + 2) += dataPoint.label*dataPoint.label //update label 
+  } 
+      return nodeAgg
+}
+    
+/**
+   * Train a random forest.
+   *
+   * @param input Training data: RDD of `LabeledPoint`
+   * @return an unweighted set of trees
+   *
+   */    
+     
   def run(
       input: RDD[LabeledPoint],
       strategy: OldStrategy,
@@ -208,13 +228,16 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       featureSubsetStrategy: String,
       featureWeight: Array[Double],
       numIteration: Int, dataSubSamplingRate : Array[Double], 
-      seed: Long): Array[DecisionTreeModel] = {
+      seed: Long, 
+      repopulate: Boolean, 
+  ): Array[DecisionTreeModel] = {
     val instances = input.map { case LabeledPoint(label, features) =>
       Instance(label, 1.0, features.asML)
     }
-    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, None)
+    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, repopulate,None)
   }
 
+    
   /**
    * Train a random forest with metadata and splits. This method is mainly for GBT,
    * in which bagged input can be reused among trees.
@@ -223,7 +246,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
    * @param metadata Learning and dataset metadata for DecisionTree.
    * @return an unweighted set of trees
    */
-  def runBagged(
+  def runBagged(input: RDD[Instance],  
       baggedInput: RDD[BaggedPoint[TreePoint]],
       metadata: WeightedDecisionTreeMetadata,
       bcSplits: Broadcast[Array[Array[Split]]],
@@ -231,6 +254,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String, 
       dataSubSamplingRate: Double, 
+      repopulate : Boolean, 
       seed: Long,
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
@@ -238,6 +262,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val timer = new TimeTracker()
     timer.start("total")
 
+      
     val sc = baggedInput.sparkContext
 
     instr match {
@@ -297,11 +322,11 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     rng.setSeed(seed)
 
     // Allocate and queue root nodes.
-    val topNodes = Array.fill[LearningNode](numTrees)(LearningNode.emptyNode(nodeIndex = 1))
+    var topNodes = Array.fill[LearningNode](numTrees)(LearningNode.emptyNode(nodeIndex = 1))
     for (treeIndex <- 0 until numTrees) {
       nodeStack.prepend((treeIndex, topNodes(treeIndex)))
     }
-
+   
     timer.stop("init")
 
     while (nodeStack.nonEmpty) {
@@ -334,7 +359,41 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
 
     logInfo("Internal timing for DecisionTree:")
     logInfo(s"$timer")
+ 
+      
+      
+   /*  
+   Helps repopulate leaves. Does so by a) clearing the leaf node of all statistics. Then using treeInput to update aggregate statistics by creating an array treeAggregator of size (numTrees)(numLeavesPerTree) for each iterating and then iterating all instances in every partition to update statistics. Then a reduce by key operation is used to update statistics across partitions and then aggregate statistics is collected as map to driver to repopulate leaves
+   Current issues: Implementation does not do certain trees at a time so might run into memory issues for very deep trees. Need to modify this but will do later... 
+   */ 
+      
+    if(repopulate){   
+        
+    val numberOfLeaves = Array.fill[Int](numTrees)(0) 
+        
+              
+    for (treeIndex <- 0 until numTrees) {
+        numberOfLeaves(treeIndex) = topNodes(treeIndex).getNumberOfLeaves
+    }
+    
+    val partitionAggregates = input.mapPartitions{points => 
+        
+        
+        val treeAggregator = Array.tabulate(numTrees)(treeIndex => Array.fill[Double](numberOfLeaves(treeIndex)*3)(0.0))
+                                                                                     
+        points.foreach(updateLeafStats(treeAggregator,_,topNodes,numTrees))
+        
+        treeAggregator.iterator.zipWithIndex.map(_.swap)
+        
+    } 
 
+   val repopulateStats =   partitionAggregates.reduceByKey((a, b) => a.zip(b).map { case (x, y) => x + y }).collectAsMap()
+   //for ((k,v) <- repopulateStats) printf("key: %s, value: %s\n", k, v.mkString(" "))
+        
+   repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}
+    } 
+ 
+      
     if (strategy.useNodeIdCache) {
       // Delete any remaining checkpoints used for node Id cache.
       nodeIdCheckpointer.unpersistDataSet()
@@ -343,7 +402,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
 
     val numFeatures = metadata.numFeatures
 
-       
       
 
     parentUID match {
@@ -386,6 +444,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numIteration: Int, 
       dataSubSamplingRate : Array[Double], 
       seed: Long,
+      repopulate: Boolean, 
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
       parentUID: Option[String] = None): Array[DecisionTreeModel] = {
@@ -422,16 +481,23 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     var runningWeight = if (featureWeight.length != metadata.numFeatures) {Array.fill(metadata.numFeatures)(1.0)} else {featureWeight}
     for (iter <- 0 until numIteration - 1) {
         metadata.featureWeight = runningWeight
-        val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-          strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), 
+        val trees = runBagged(input = input, baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits, strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), repopulate = repopulate, 
           seed = seed, instr = instr, prune = prune, parentUID = parentUID)
         runningWeight = TreeEnsembleModel.featureImportances(trees, metadata.numFeatures, true).toArray
     }
     metadata.featureWeight = runningWeight
-    val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, 
+    val trees = runBagged(input = input, baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
+      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, repopulate = repopulate, 
       seed = seed, instr = instr, prune = prune, parentUID = parentUID)
-
+    /*
+     val tree0_iterator = trees(0).leafIterator(trees(0).rootNode)
+     while(tree0_iterator.hasNext){
+         val leaf = tree0_iterator.next()
+         leaf.prediction = 123123
+         println(leaf.prediction)
+     }
+     */
+      
     baggedInput.unpersist()
     bcSplits.destroy()
 
@@ -469,9 +535,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         }
         treeId += 1
       }
-      //nodeIds.foreach(println)
-      //ids.foreach(println)
-      //println(ids.collect().foreach(arr => println(arr.toList)))
       ids
     }
   }

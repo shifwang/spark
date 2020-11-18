@@ -71,7 +71,8 @@ private[tree] object Split {
  *                         left. Otherwise, it goes right.
  * @param numCategories  Number of categories for this feature.
  */
-class CategoricalSplit private[ml] (
+//Abhi: Removing private[ml]
+class CategoricalSplit(
     override val featureIndex: Int,
     _leftCategories: Array[Double],
     @Since("2.0.0") val numCategories: Int)
@@ -82,11 +83,13 @@ class CategoricalSplit private[ml] (
 
   /**
    * If true, then "categories" is the set of categories for splitting to the left, and vice versa.
-   */
-  private val isLeft: Boolean = _leftCategories.length <= numCategories / 2
+   */ 
+ //Abhi : removing private
+  val isLeft: Boolean = _leftCategories.length <= numCategories / 2
 
   /** Set of categories determining the splitting rule, along with [[isLeft]]. */
-  private val categories: Set[Double] = {
+  //Abhi: removing private
+  val categories: Set[Double] = {
     if (isLeft) {
       _leftCategories.toSet
     } else {
@@ -154,7 +157,8 @@ class CategoricalSplit private[ml] (
  * @param threshold  If the feature value is less than or equal to this threshold, then the
  *                   split goes left. Otherwise, it goes right.
  */
-class ContinuousSplit private[ml] (override val featureIndex: Int, val threshold: Double)
+//Abhi: Removing private[ml] for test. 
+class ContinuousSplit (override val featureIndex: Int, val threshold: Double)
   extends Split {
 
   override private[ml] def shouldGoLeft(features: Vector): Boolean = {

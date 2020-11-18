@@ -19,7 +19,11 @@ package org.apache.spark.ml.tree
 
 import org.apache.spark.ml.linalg.Vector
 import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
+import org.apache.spark.mllib.tree.impurity.VarianceCalculator
 import scala.collection.mutable.ArrayBuffer
+import org.apache.spark.ml.feature.Instance
+import org.apache.spark.ml.tree.impl.TreePoint
+
 import org.apache.spark.mllib.tree.model.{ImpurityStats, InformationGainStats => OldInformationGainStats, Node => OldNode, Predict => OldPredict}
 
 /**
@@ -441,9 +445,129 @@ private[tree] class LearningNode(
     }
     node.id
   }
+    
+    
+    
+     def clearLeaves : Unit = {
+     if(leftChild.isEmpty & rightChild.isEmpty) //Is a leaf Node
+      {
+          val emptyStats = Array.fill[Double](3)(0.0)
+          this.stats = new ImpurityStats(Double.NaN,Double.NaN,new VarianceCalculator(emptyStats,0),null, null)
+      }
+      
+      else{ //Internal node and so both left and right child are not empty according to  org.apache.spark.ml.tree.node implementation 
+          leftChild.get.clearLeaves
+          rightChild.get.clearLeaves
+      }
+ }
+    /*
+    
+    def repopulateLeaves( dataPoint : Instance) : Unit = {
+        var node = this
+        while(!node.isLeaf && node.split.nonEmpty){
+            val split = node.split.get.asInstanceOf[ContinuousSplit]
+            val featureIndex = split.featureIndex
+            val threshold = split.threshold
+            if(dataPoint.binnedFeatures(featureIndex) < threshold){
+                node = node.leftChild.get
+            }
+            else{
+                node = node.rightChild.get
+            }
+        }
+        val label = dataPoint.label
+        node.stats.impurityCalculator.stats(0) += 1.0
+        node.stats.impurityCalculator.stats(1) += label
+        node.stats.impurityCalculator.stats(2) += label*label
+        node.stats.impurityCalculator.rawCount += 1.0.toLong
+
+    }*/
+    
+    def repopulate(leafStats : Array[Double], offset : Int, numLeaves: Int) : Unit = {
+        if (!leftChild.isEmpty || !rightChild.isEmpty){//internal node
+            val leftOffset = offset
+            val rightOffset = offset + this.getNumberOfLeaves - rightChild.get.getNumberOfLeaves
+            leftChild.get.repopulate(leafStats,leftOffset,numLeaves)
+            rightChild.get.repopulate(leafStats,rightOffset,numLeaves )
+        }
+        else{ //leaf node
+            val count = leafStats(offset*3) 
+            val sum = leafStats(offset*3 + 1)
+            val sumSquared = leafStats(offset*3 + 2)
+            val repopulatedStats = Array(count,sum,sumSquared)
+            var impurity = 0.0
+            if(count != 0){
+              impurity = (1.0/count)*(sumSquared - ((1.0)/count)*(sum*sum))
+            }
+            this.stats = new ImpurityStats(Double.NaN, impurity, new
+            VarianceCalculator(repopulatedStats,count.toLong),null, null)
+            }
+       }
+    
+    
+  def getLeafIndex(features : Vector) : Int = {
+        var node = this
+        val numLeaves = this.getNumberOfLeaves
+        var leafIndex = 0
+        while(!node.isLeaf && node.split.nonEmpty){
+            if(node.split.get.isInstanceOf[ContinuousSplit]){
+                val split = node.split.get.asInstanceOf[ContinuousSplit]
+                val featureIndex = split.featureIndex
+                val threshold = split.threshold
+                if(features.apply(featureIndex) <= threshold){
+                node = node.leftChild.get
+                }
+                else{
+                val currentNumLeaves = node.getNumberOfLeaves
+                node = node.rightChild.get
+                leafIndex += currentNumLeaves - node.getNumberOfLeaves
+                }
+            }
+            
+            else{
+                 //println("considering categorical split")
+                 val split = node.split.get.asInstanceOf[CategoricalSplit]
+                 val featureIndex = split.featureIndex
+                 val leftCategories = split.categories
+                 if(leftCategories.toArray contains features.apply(featureIndex)){
+                     node = node.leftChild.get
+                 }
+                else{
+                    node = node.rightChild.get
+                    leafIndex += numLeaves - node.getNumberOfLeaves
+                }
+            }
+
+        }
+      return leafIndex
+    
+    }
+   
+
+    
+    def getNumberOfLeaves : Int = {
+         if(leftChild.isEmpty & rightChild.isEmpty) //Is a leaf Node
+      {
+          return 1; 
+      }
+        else{
+            return leftChild.get.getNumberOfLeaves + rightChild.get.getNumberOfLeaves
+        }
+    }
 
 }
 
+
+
+
+
+      /*
+  def predictImplLeaf(binnedFeatures: Array[Int]) : LearningNode = {
+      var node = this
+      
+      
+  }
+  */
 private[tree] object LearningNode {
 
   /** Create a node with some of its fields set. */
@@ -467,7 +591,7 @@ private[tree] object LearningNode {
   def leftChildIndex(nodeIndex: Int): Int = nodeIndex << 1
 
   /**
-   * Return the index of the right child of this node.
+   * Return the index of the right child of this node.ya
    */
   def rightChildIndex(nodeIndex: Int): Int = (nodeIndex << 1) + 1
 

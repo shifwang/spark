@@ -86,7 +86,8 @@ private[spark] trait DecisionTreeModel {
    * @return an iterator that traverses (DFS, left to right) the leaves
    *         in the subtree of this node.
    */
-  private def leafIterator(node: Node): Iterator[LeafNode] = {
+    //private  def leafIterator(node: Node): Iterator[LeafNode]
+  def leafIterator(node: Node): Iterator[LeafNode] = {
     node match {
       case l: LeafNode => Iterator.single(l)
       case n: InternalNode =>
