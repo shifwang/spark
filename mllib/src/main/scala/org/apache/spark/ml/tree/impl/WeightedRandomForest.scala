@@ -213,6 +213,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       return nodeAgg
 }
     
+    
+  //def repopulator()
 /**
    * Train a random forest.
    *
@@ -236,6 +238,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     }
     run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, repopulate,None)
   }
+    
+ 
 
     
   /**
@@ -477,7 +481,10 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         (tp: TreePoint) => tp.weight, seed = seed)
       .persist(StorageLevel.MEMORY_AND_DISK)
       .setName("bagged tree points")
-
+     
+    if(repopulate){  
+    //input.persist(StorageLevel.MEMORY_AND_DISK).setName("training data")
+    }
     var runningWeight = if (featureWeight.length != metadata.numFeatures) {Array.fill(metadata.numFeatures)(1.0)} else {featureWeight}
     for (iter <- 0 until numIteration - 1) {
         metadata.featureWeight = runningWeight
@@ -499,6 +506,9 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
      */
       
     baggedInput.unpersist()
+    if(repopulate){  
+    //input.unpersist()
+    }
     bcSplits.destroy()
 
     trees

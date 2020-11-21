@@ -529,13 +529,20 @@ private[tree] class LearningNode(
                  val split = node.split.get.asInstanceOf[CategoricalSplit]
                  val featureIndex = split.featureIndex
                  val leftCategories = split.categories
+                 val feature_cat = features.apply(featureIndex)
+                 //println(leftCategories.toArray.mkString(" "))
+                //println(s"feature Index = $featureIndex")
+                //println(s"feature cat = $feature_cat")
                  if(leftCategories.toArray contains features.apply(featureIndex)){
                      node = node.leftChild.get
                  }
                 else{
+                    val currentNumLeaves = node.getNumberOfLeaves
                     node = node.rightChild.get
-                    leafIndex += numLeaves - node.getNumberOfLeaves
+                    leafIndex += currentNumLeaves - node.getNumberOfLeaves
+                    //leafIndex += numLeaves - node.getNumberOfLeaves
                 }
+                //println(offset)
             }
 
         }
