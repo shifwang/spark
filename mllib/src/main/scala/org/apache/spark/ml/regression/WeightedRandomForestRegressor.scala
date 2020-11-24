@@ -128,6 +128,11 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
 
   def setRepopulate(value : Boolean) : this.type = set(repopulate, value)    
 
+  def setUseBinned(value : Boolean) : this.type = set(useBinned, value)    
+
+  def setUseOOB(value : Boolean) : this.type = set(useOOB, value)    
+
+      
   /** @group setParam */
   @Since("1.4.0")
   def setFeatureSubsetStrategy(value: String): this.type =
@@ -161,7 +166,7 @@ class WeightedRandomForestRegressor @Since("1.4.0") (@Since("1.4.0") override va
       checkpointInterval, bootstrap)
 
     val trees = WeightedRandomForest
-      .run(instances, strategy, getNumTrees, getFeatureSubsetStrategy, getFeatureWeight, getNumIteration, getDataSubSamplingRate, getSeed, getRepopulate, Some(instr))
+      .run(instances, strategy, getNumTrees, getFeatureSubsetStrategy, getFeatureWeight, getNumIteration, getDataSubSamplingRate, getSeed, getRepopulate, getUseBinned, getUseOOB, Some(instr))
       .map(_.asInstanceOf[DecisionTreeRegressionModel])
     trees.foreach(copyValues(_))
 

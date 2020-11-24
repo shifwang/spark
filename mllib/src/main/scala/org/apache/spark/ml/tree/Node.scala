@@ -448,6 +448,8 @@ private[tree] class LearningNode(
     
     
     
+    
+    
      def clearLeaves : Unit = {
      if(leftChild.isEmpty & rightChild.isEmpty) //Is a leaf Node
       {
@@ -533,7 +535,7 @@ private[tree] class LearningNode(
                  //println(leftCategories.toArray.mkString(" "))
                 //println(s"feature Index = $featureIndex")
                 //println(s"feature cat = $feature_cat")
-                 if(leftCategories.toArray contains features.apply(featureIndex)){
+                 if(leftCategories.toArray contains features.apply(featureIndex).toDouble){
                      node = node.leftChild.get
                  }
                 else{
@@ -549,8 +551,7 @@ private[tree] class LearningNode(
       return leafIndex
     
     }
-   
-
+                
     
     def getNumberOfLeaves : Int = {
          if(leftChild.isEmpty & rightChild.isEmpty) //Is a leaf Node
@@ -561,9 +562,29 @@ private[tree] class LearningNode(
             return leftChild.get.getNumberOfLeaves + rightChild.get.getNumberOfLeaves
         }
     }
+    
+    def getBinnedLeafIndex(dataPoint : TreePoint,splits: Array[Array[Split]]) : Int = {
+        var node = this
+        var leafIndex = 0
+        while(!node.isLeaf &&  node.split.nonEmpty){
+             val split = node.split.get
+             val featureIndex = split.featureIndex
+             val splitLeft = split.shouldGoLeft(dataPoint.binnedFeatures(featureIndex),splits(featureIndex))
+             if(splitLeft){
+                    node = node.leftChild.get
+             }
+            else{
+                val currentNumLeaves = node.getNumberOfLeaves
+                node = node.rightChild.get
+                leafIndex += currentNumLeaves - node.getNumberOfLeaves
+            }
 
+        }
+        return leafIndex
+    }
+    
 }
-
+    
 
 
 

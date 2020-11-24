@@ -63,6 +63,22 @@ private[ml] trait WeightedRandomForestParams extends RandomForestParams {
 
      final def getRepopulate: Boolean = $(repopulate)
     
+    
+   final val useBinned: BooleanParam =
+    new BooleanParam(this, "useBinned", "If false, the " +
+    " algorithm will not use binned values to populate leaves. If true, the  " + "algorithm will use binned values.")
+    
+  setDefault(useBinned -> false)
+
+     final def getUseBinned: Boolean = $(useBinned)
+    
+    final val useOOB:  BooleanParam =
+    new BooleanParam(this,"useOOB", "If false, the " +
+    " algorithm will not use OOB samples to populate leaves. If true, the  " + "algorithm will use OOB binned values.")
+    
+    setDefault(useOOB -> false)
+    
+    final def getUseOOB: Boolean = $(useOOB)
 }
 
 private[ml] trait WeightedRandomForestClassifierParams

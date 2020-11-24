@@ -204,14 +204,50 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       
       for (treeIndex <- 0 until numTrees) {
           offset = topNodes(treeIndex).getLeafIndex(dataPoint.features)
-          //println(s"For tree = $treeIndex")
-          //println(s"leafIndex is = $offset")
           nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
           nodeAgg(treeIndex)(offset*3 + 1) += dataPoint.label //update label sum 
           nodeAgg(treeIndex)(offset*3 + 2) += dataPoint.label*dataPoint.label //update label 
   } 
       return nodeAgg
 }
+  def updateBinnedLeafStats(nodeAgg : Array[Array[Double]], 
+                      dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
+                      numTrees : Int, bcSplits: Broadcast[Array[Array[Split]]]) :  Array[Array[Double]] = {
+     
+      var offset = 0
+      for (treeIndex <- 0 until numTrees) {
+           offset = topNodes(treeIndex).getBinnedLeafIndex(dataPoint.datum, bcSplits.value)
+           val label = dataPoint.datum.label
+           nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
+           nodeAgg(treeIndex)(offset*3 + 1) += label //update label sum 
+           nodeAgg(treeIndex)(offset*3 + 2) += label*label //update label
+          
+      }
+           return nodeAgg
+     }
+    
+    
+ def updateBinnedLeafStatsOOB(nodeAgg : Array[Array[Double]], 
+                      dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
+                      numTrees : Int, bcSplits: Broadcast[Array[Array[Split]]]) :  Array[Array[Double]] = {
+      var offset = 0
+      for (treeIndex <- 0 until numTrees) {
+          if(dataPoint.subsampleCounts(treeIndex) == 0){
+                  offset = topNodes(treeIndex).getBinnedLeafIndex(dataPoint.datum, bcSplits.value)
+                  val label = dataPoint.datum.label
+                  nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
+                  nodeAgg(treeIndex)(offset*3 + 1) += label//update label sum 
+                  nodeAgg(treeIndex)(offset*3 + 2) += label*label //update label
+              
+              
+          }
+      }
+     
+     return nodeAgg
+ }
+    
+
+    
     
     
   //def repopulator()
@@ -232,11 +268,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numIteration: Int, dataSubSamplingRate : Array[Double], 
       seed: Long, 
       repopulate: Boolean, 
+      useBinned: Boolean, 
+      useOOB: Boolean
   ): Array[DecisionTreeModel] = {
     val instances = input.map { case LabeledPoint(label, features) =>
       Instance(label, 1.0, features.asML)
     }
-    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, repopulate,None)
+    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, repopulate,useBinned,useOOB,None)
   }
     
  
@@ -259,6 +297,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       featureSubsetStrategy: String, 
       dataSubSamplingRate: Double, 
       repopulate : Boolean, 
+      useBinned : Boolean, 
+      useOOB: Boolean, 
       seed: Long,
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
@@ -371,7 +411,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
    Current issues: Implementation does not do certain trees at a time so might run into memory issues for very deep trees. Need to modify this but will do later... 
    */ 
       
-    if(repopulate){   
+    if(repopulate & useBinned){   
+        
         
     val numberOfLeaves = Array.fill[Int](numTrees)(0) 
         
@@ -380,23 +421,48 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         numberOfLeaves(treeIndex) = topNodes(treeIndex).getNumberOfLeaves
     }
     
-    val partitionAggregates = input.mapPartitions{points => 
+    val partitionAggregates = baggedInput.mapPartitions{points =>  //originally input
         
         
         val treeAggregator = Array.tabulate(numTrees)(treeIndex => Array.fill[Double](numberOfLeaves(treeIndex)*3)(0.0))
+        
+        if(useOOB){
                                                                                      
-        points.foreach(updateLeafStats(treeAggregator,_,topNodes,numTrees))
+        points.foreach(updateBinnedLeafStatsOOB(treeAggregator,_,topNodes,numTrees, bcSplits))} //originally updateLeafStats
         
-        treeAggregator.iterator.zipWithIndex.map(_.swap)
+        else{
+            points.foreach(updateBinnedLeafStats(treeAggregator,_,topNodes,numTrees, bcSplits))}
+           
         
-    } 
-
+        treeAggregator.iterator.zipWithIndex.map(_.swap)}
+    
+      
    val repopulateStats =   partitionAggregates.reduceByKey((a, b) => a.zip(b).map { case (x, y) => x + y }).collectAsMap()
-   //for ((k,v) <- repopulateStats) printf("key: %s, value: %s\n", k, v.mkString(" "))
         
    repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}
-    } 
- 
+    }
+      
+  else if(repopulate & !useBinned){
+     val numberOfLeaves = Array.fill[Int](numTrees)(0) 
+        
+    for (treeIndex <- 0 until numTrees) {
+        numberOfLeaves(treeIndex) = topNodes(treeIndex).getNumberOfLeaves
+    }
+      
+    val partitionAggregates = input.mapPartitions{points =>  //originally input
+        
+        
+        val treeAggregator = Array.tabulate(numTrees)(treeIndex => Array.fill[Double](numberOfLeaves(treeIndex)*3)(0.0))
+        points.foreach(updateLeafStats(treeAggregator,_,topNodes,numTrees))
+        treeAggregator.iterator.zipWithIndex.map(_.swap)}
+      
+       val repopulateStats =   partitionAggregates.reduceByKey((a, b) => a.zip(b).map { case (x, y) => x + y }).collectAsMap()
+       repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}
+  }
+
+      
+      
+   
       
     if (strategy.useNodeIdCache) {
       // Delete any remaining checkpoints used for node Id cache.
@@ -449,6 +515,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       dataSubSamplingRate : Array[Double], 
       seed: Long,
       repopulate: Boolean, 
+      useBinned : Boolean, 
+      useOOB: Boolean, 
       instr: Option[Instrumentation],
       prune: Boolean = true, // exposed for testing only, real trees are always pruned
       parentUID: Option[String] = None): Array[DecisionTreeModel] = {
@@ -488,13 +556,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     var runningWeight = if (featureWeight.length != metadata.numFeatures) {Array.fill(metadata.numFeatures)(1.0)} else {featureWeight}
     for (iter <- 0 until numIteration - 1) {
         metadata.featureWeight = runningWeight
-        val trees = runBagged(input = input, baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits, strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), repopulate = repopulate, 
+        val trees = runBagged(input = input, baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits, strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
           seed = seed, instr = instr, prune = prune, parentUID = parentUID)
         runningWeight = TreeEnsembleModel.featureImportances(trees, metadata.numFeatures, true).toArray
     }
     metadata.featureWeight = runningWeight
     val trees = runBagged(input = input, baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, repopulate = repopulate, 
+      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
       seed = seed, instr = instr, prune = prune, parentUID = parentUID)
     /*
      val tree0_iterator = trees(0).leafIterator(trees(0).rootNode)
