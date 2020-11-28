@@ -664,6 +664,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         val featureSplits = splits(featureIndex)
         var splitIndex = 0
         while (splitIndex < numSplits) {
+         
           if (featureSplits(splitIndex).shouldGoLeft(featureValue, featureSplits)) {
             agg.featureUpdate(leftNodeFeatureOffset, splitIndex, treePoint.label, numSamples,
               sampleWeight)
@@ -672,6 +673,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         }
       } else {
         // Ordered feature
+         
         val binIndex = treePoint.binnedFeatures(featureIndex)
         agg.update(featureIndexIdx, binIndex, treePoint.label, numSamples, sampleWeight)
       }
@@ -697,7 +699,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       sampleWeight: Double,
       featuresForNode: Option[Array[Int]]): Unit = {
     val label = treePoint.label
-
     // Iterate over features.
     if (featuresForNode.nonEmpty) {
       // Use subsampled features
@@ -836,14 +837,15 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         baggedPoint: BaggedPoint[TreePoint],
         splits: Array[Array[Split]],
         dataSubSamplingRate : Double,
-        randomSample: Double): Array[DTStatsAggregator] = {
-        if(randomSample < dataSubSamplingRate){
+        seed: Long): Array[DTStatsAggregator] = {
+        val subsampleRand = new XORShiftRandom(seed)
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
+        if(subsampleRand.nextDouble < dataSubSamplingRate){
         val nodeIndex =
           topNodesForGroup(treeIndex).predictImpl(baggedPoint.datum.binnedFeatures, splits)
         nodeBinSeqOp(treeIndex, nodeIndexToInfo.getOrElse(nodeIndex, null),
-          agg, baggedPoint, splits)
-      }}
+          agg, baggedPoint, splits)}
+      }
       agg
     }
 
@@ -855,14 +857,16 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         dataPoint: (BaggedPoint[TreePoint], Array[Int]), 
         splits: Array[Array[Split]],
         dataSubSamplingRate : Double, 
-        randomSample : Double ): Array[DTStatsAggregator] = {
-        if(randomSample < dataSubSamplingRate){
+        seed : Long ): Array[DTStatsAggregator] = {
+        val subsampleRand = new XORShiftRandom(seed)
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
+        if(subsampleRand.nextDouble < dataSubSamplingRate){
         val baggedPoint = dataPoint._1
         val nodeIdCache = dataPoint._2
         val nodeIndex = nodeIdCache(treeIndex)
         nodeBinSeqOp(treeIndex, nodeIndexToInfo.getOrElse(nodeIndex, null),
           agg, baggedPoint, splits)
+        
       }}
       agg
     }
@@ -919,7 +923,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           new DTStatsAggregator(metadata, featuresForNode)
         }
           
-        val subsampleRand = new XORShiftRandom(rng.nextLong() + pID.toLong)
         
         
           
@@ -927,7 +930,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         // iterator all instances in current partition and update aggregate stats
         //points.zipWithIndex.foreach((point,i) => binSeqOpWithNodeIdCache(nodeStatsAggregators, _, bcSplits.value, dataSubSamplingRate, rng.nextLong()+pID.toLong + i.toLong))
         //points.zipWithIndex.foreach{x => println("Partition ID is: " + pID.toString + "  point ID is: " + x._2.toString + "randon number: " + (rng.nextLong()+pID.toLong).toString)}
-        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value, dataSubSamplingRate, subsampleRand.nextDouble()))
+        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value, dataSubSamplingRate, rng.nextLong()+ pID.toLong + 1.toLong))
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
         nodeStatsAggregators.iterator.zipWithIndex.map(_.swap)
@@ -942,10 +945,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           }
           new DTStatsAggregator(metadata, featuresForNode)
         }
-        val subsampleRand = new XORShiftRandom(rng.nextLong() + pID.toLong)
-
         // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOp(nodeStatsAggregators, _, bcSplits.value,dataSubSamplingRate, subsampleRand.nextDouble()))
+        points.foreach(binSeqOp(nodeStatsAggregators, _, bcSplits.value,dataSubSamplingRate,rng.nextLong()+ pID.toLong + 1.toLong))
 
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
