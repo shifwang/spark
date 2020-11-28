@@ -174,7 +174,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
             if(weight(i)!= 0.0){
             all_zero = 0
             key1 = scala.math.pow(rand.nextDouble(),1/weight(i))
-            reservoir_map += (key1 -> item)
+            //reservoir_map += (key1 -> item)
              if (key1 > reservoir_map.keysIterator.min){
                 reservoir_map -= reservoir_map.keysIterator.min
                 reservoir_map += (key1 -> item)
@@ -186,7 +186,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
             //}
             i+= 1
           }
-          //println("Final Reservoir size  :" + reservoir_map.size)
+            //println("Final Reservoir size  :" + reservoir_map.size)
           //println(reservoir_map.values.toArray.mkString(" "))
           //if(all_zero == 1){
            //   return (reservoirWeightedSampling(input,k,weight,seed))
