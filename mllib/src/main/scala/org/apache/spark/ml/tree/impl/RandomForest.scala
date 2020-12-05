@@ -206,6 +206,7 @@ private[spark] object RandomForest extends Logging with Serializable {
       val bestSplit = RandomForest.findBestSplits(baggedInput, metadata, topNodesForGroup,
         nodesForGroup, treeToNodeToIndexInfo, bcSplits, nodeStack, timer, nodeIds,
         outputBestSplits = strategy.useNodeIdCache)
+    
       if (strategy.useNodeIdCache) {
         nodeIds = updateNodeIds(baggedInput, nodeIds, bcSplits, bestSplit)
         nodeIdCheckpointer.update(nodeIds)
@@ -419,7 +420,6 @@ private[spark] object RandomForest extends Logging with Serializable {
       sampleWeight: Double,
       featuresForNode: Option[Array[Int]]): Unit = {
     val label = treePoint.label
-
     // Iterate over features.
     if (featuresForNode.nonEmpty) {
       // Use subsampled features
