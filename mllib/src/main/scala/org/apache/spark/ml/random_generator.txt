@@ -1,0 +1,83 @@
+import org.apache.spark.ml.Pipeline
+import org.apache.spark.ml.evaluation.RegressionEvaluator
+import org.apache.spark.ml.feature.VectorIndexer
+import org.apache.spark.ml.linalg.Vectors
+import org.apache.spark.mllib.tree.DecisionTree
+import org.apache.spark.mllib.tree.model.DecisionTreeModel
+import org.apache.spark.ml.regression.{RandomForestRegressionModel, WeightedRandomForestRegressor}
+import org.apache.spark.sql.functions.rand
+import org.apache.spark.sql.types.StructField
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{ArrayType, IntegerType, LongType}
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.Row
+import org.apache.spark.ml.fpm.irf
+import org.apache.spark.util.SizeEstimator
+
+
+
+val nrows = 10000
+val ncols = 100
+
+val label_df = (1 to nrows).map(_ => (scala.util.Random.nextDouble)).toDF("label")
+val createRandomVector = udf((rank: Int) => {Vectors.dense(Array.fill(rank)(scala.util.Random.nextDouble))})
+val df = label_df.withColumn("features", createRandomVector(lit(ncols)))
+
+
+
+// Automatically identify categorical features, and index them.
+// Set maxCategories so features with > 4 distinct values are trea/ted as continuous.
+val featureIndexer = new VectorIndexer()
+  .setInputCol("features")
+  .setOutputCol("indexedFeatures")
+  .setMaxCategories(4)
+  .fit(df)
+
+// Split the data into training and test sets (30% held out for testing).
+val Array(trainingData, testData) = df.randomSplit(Array(0.90, 0.10))
+
+//val weights = Array.fill(692)(0.0)
+//weights(182) = 1.0
+//weights(626) = 1.0
+//weights(245) = 1.0
+val rf = new WeightedRandomForestRegressor()
+  .setLabelCol("label")
+  .setFeaturesCol("indexedFeatures") 
+  .setNumTrees(5)
+  .setNumIteration(1)
+  .setDataSubSamplingRate(1)
+  .setCacheNodeIds(true)
+  .setSeed(11223)
+//  .setFeatureWeight(weights)
+ 
+// Chain indexer and forest in a Pipeline.
+val pipeline = new Pipeline()
+  .setStages(Array(featureIndexer, rf))
+
+// Train model. This also runs the indexer.
+val model = pipeline.fit(trainingData)
+
+// Make predictions.
+val predictions = model.transform(testData)
+
+
+
+// Select example rows to display.
+predictions.select("prediction", "label", "features").show(5)
+
+// Select (prediction, true label) and compute test error.
+val evaluator = new RegressionEvaluator()
+  .setLabelCol("label")
+  .setPredictionCol("prediction")
+  .setMetricName("rmse")
+val rmse = evaluator.evaluate(predictions)
+println(s"Root Mean Squared Error (RMSE) on test data = $rmse")
+
+val rfModel = model.stages(1).asInstanceOf[RandomForestRegressionModel]
+//println(rfModel.toString())
+//println(rfModel.partitions.size)
+println(s"Learned regression forest model:\n ${rfModel.toDebugString}")
+
+//val rdc = model.stages(1).asInstanceOf[WeightedRandomForestRegressionModel]
+
+irf.findInteraction(rfModel, 1.0 / math.pow(2, 3), spark)

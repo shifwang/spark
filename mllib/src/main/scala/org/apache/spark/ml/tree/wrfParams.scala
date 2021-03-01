@@ -55,6 +55,14 @@ private[ml] trait WeightedRandomForestParams extends RandomForestParams {
   /** @group getParam */
   final def getDataSubSamplingRate: Array[Double] = $(dataSubSamplingRate)
    
+  final val partitionSubsamplingRate : DoubleParam  = 
+    new DoubleParam(this,"partitonSubsamplingRate", "partition subsampling rate", _ >= 0.0)
+    
+  setDefault(partitionSubsamplingRate -> 1.0)
+    
+  final def getPartitionSubsamplingRate : Double = $(partitionSubsamplingRate)
+    
+    
    final val repopulate: BooleanParam =
     new BooleanParam(this, "repopulate", "If false, the " +
     " algorithm will use bagged input to populate leaves. If true, the  " + "algorithm will populate leaves with the entire training set.")

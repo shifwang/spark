@@ -267,7 +267,9 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String,
       featureWeight: Array[Double],
-      numIteration: Int, dataSubSamplingRate : Array[Double], 
+      numIteration: Int, 
+      dataSubSamplingRate : Array[Double], 
+      partitionSubsamplingRate : Double,
       seed: Long, 
       repopulate: Boolean, 
       useBinned: Boolean, 
@@ -276,7 +278,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val instances = input.map { case LabeledPoint(label, features) =>
       Instance(label, 1.0, features.asML)
     }
-    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate, seed, repopulate,useBinned,useOOB,None)
+    run(instances, strategy, numTrees, featureSubsetStrategy, featureWeight, numIteration, dataSubSamplingRate,partitionSubsamplingRate,seed, repopulate,useBinned,useOOB,None)
   }
     
  
@@ -298,12 +300,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       numTrees: Int,
       featureSubsetStrategy: String, 
       dataSubSamplingRate: Double, 
+      partitionSubsamplingRate : Double, 
       repopulate : Boolean, 
       useBinned : Boolean, 
       useOOB: Boolean, 
       seed: Long,
       instr: Option[Instrumentation],
-      prune: Boolean = true, // exposed for testing only, real trees are always pruned, Abhi changed it to false. 
+      prune: Boolean = true, // exposed for testing only, real trees are always pruned
       parentUID: Option[String] = None): Array[DecisionTreeModel] = {
     val timer = new TimeTracker()
     timer.start("total")
@@ -391,7 +394,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       // Choose node splits, and enqueue new nodes as needed.
       timer.start("findBestSplits")
       val bestSplit = WeightedRandomForest.findBestSplits(baggedInput, metadata, topNodesForGroup,
-        nodesForGroup, treeToNodeToIndexInfo, bcSplits, nodeStack, timer, nodeIds, dataSubSamplingRate, rng, 
+        nodesForGroup, treeToNodeToIndexInfo, bcSplits, nodeStack, timer, nodeIds, dataSubSamplingRate, partitionSubsamplingRate,rng, 
         outputBestSplits = strategy.useNodeIdCache)
      
       if (strategy.useNodeIdCache) {
@@ -516,6 +519,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       featureWeight: Array[Double],
       numIteration: Int, 
       dataSubSamplingRate : Array[Double], 
+      partitionSubsamplingRate : Double,
       seed: Long,
       repopulate: Boolean, 
       useBinned : Boolean, 
@@ -556,13 +560,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     var runningWeight = if (featureWeight.length != metadata.numFeatures) {Array.fill(metadata.numFeatures)(1.0)} else {featureWeight}
     for (iter <- 0 until numIteration - 1) {
         metadata.featureWeight = runningWeight
-        val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits, strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
+        val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits, strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.apply(iter), partitionSubsamplingRate = partitionSubsamplingRate, repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
           seed = seed, instr = instr, prune = prune, parentUID = parentUID)
         runningWeight = TreeEnsembleModel.featureImportances(trees, metadata.numFeatures, true).toArray
     }
     metadata.featureWeight = runningWeight
     val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
-      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
+      strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, partitionSubsamplingRate = partitionSubsamplingRate, repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
       seed = seed, instr = instr, prune = prune, parentUID = parentUID)
     /*
      val tree0_iterator = trees(0).leafIterator(trees(0).rootNode)
@@ -748,6 +752,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       timer: TimeTracker = new TimeTracker,
       nodeIds: RDD[Array[Int]] = null,
       dataSubSamplingRate: Double, 
+      partitionSubsamplingRate : Double, 
       rng : Random, 
       outputBestSplits: Boolean = false): Array[Map[Int, Split]] = {
   
@@ -925,7 +930,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
 
     val partitionAggregates = if (useNodeIdCache) {
        
-      input.zip(nodeIds).mapPartitionsWithIndex{ (pID,points) =>  //.sample(false,dataSubSamplingRate,rng.nextLong())
+      input.zip(nodeIds).sample(false,partitionSubsamplingRate,rng.nextLong()).mapPartitionsWithIndex{ (pID,points) =>  //
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
           val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
@@ -935,13 +940,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           new DTStatsAggregator(metadata, featuresForNode)
         }
         // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value, dataSubSamplingRate, rng.nextLong()+ pID.toLong + 1L))
+        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value,dataSubSamplingRate, rng.nextLong()+ pID.toLong + 1L)) //dataSubSamplingRate
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
         nodeStatsAggregators.iterator.zipWithIndex.map(_.swap)
       }
     } else {
-      input.mapPartitionsWithIndex{(pID,points) => 
+      input.sample(false,partitionSubsamplingRate,rng.nextLong()).mapPartitionsWithIndex{(pID,points) => 
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
         val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
@@ -993,6 +998,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         val isLeaf =
           (stats.gain <= 0) || (LearningNode.indexToLevel(nodeIndex) == metadata.maxDepth)
         node.isLeaf = isLeaf
+        
         node.stats = stats
         logDebug(s"Node = $node")
         //LearningNode.emptyNode
@@ -1089,12 +1095,15 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       rightImpurityCalculator: ImpurityCalculator,
       metadata: DecisionTreeMetadata): ImpurityStats = {
 
+      
     val parentImpurityCalculator: ImpurityCalculator = if (stats == null) {
       leftImpurityCalculator.copy.add(rightImpurityCalculator)
     } else {
       stats.impurityCalculator
     }
-
+    
+   
+      
     val impurity: Double = if (stats == null) {
       parentImpurityCalculator.calculate()
     } else {
@@ -1150,13 +1159,20 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       node: LearningNode): (Split, ImpurityStats) = {
 
     // Calculate InformationGain and ImpurityStats if current node is top node
+   
     val level = LearningNode.indexToLevel(node.id)
     var gainAndImpurityStats: ImpurityStats = if (level == 0) {
       null
     } else {
       node.stats
     }
-
+      
+    
+      
+    //var gainAndImpurityStats: ImpurityStats = null
+    
+      
+      
     val numCandidates = if (featuresForNode.isDefined) {
         featuresForNode.get.length
     } else {
