@@ -850,9 +850,17 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           val nodeIndex = 
           topNodesForGroup(treeIndex).predictImpl(baggedPoint.datum.binnedFeatures, splits)
           val numSamples =  baggedPoint.subsampleCounts(treeIndex)
+          val isPresent = nodeIndexToInfo.getOrElse(nodeIndex, null)
+          if((numSamples!= 0 && isPresent!=null)){
+            if(subsampleRand.nextDouble < dataSubSamplingRate){
+                nodeBinSeqOp(treeIndex,isPresent,agg,baggedPoint,splits)
+            }
+        }
+        /**
         if((numSamples != 0 && (subsampleRand.nextDouble < dataSubSamplingRate))){
         nodeBinSeqOp(treeIndex, nodeIndexToInfo.getOrElse(nodeIndex, null), 
           agg, baggedPoint, splits)}
+          **/
         else{
             
         }
@@ -876,10 +884,17 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         val baggedPoint = dataPoint._1
         val nodeIdCache = dataPoint._2
         val nodeIndex = nodeIdCache(treeIndex)
+        val isPresent = nodeIndexToInfo.getOrElse(nodeIndex, null)
         val numSamples =  baggedPoint.subsampleCounts(treeIndex)
+        if((numSamples!= 0 && isPresent!=null)){
+            if(subsampleRand.nextDouble < dataSubSamplingRate){
+                nodeBinSeqOp(treeIndex,isPresent,agg,baggedPoint,splits)
+            }
+        }/**
         if((numSamples != 0 && (subsampleRand.nextDouble < dataSubSamplingRate))){
         nodeBinSeqOp(treeIndex, nodeIndexToInfo.getOrElse(nodeIndex, null),
           agg, baggedPoint, splits)}
+          **/
         else{
             
         }
@@ -929,8 +944,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val nodeToFeaturesBc = input.sparkContext.broadcast(nodeToFeatures)
 
     val partitionAggregates = if (useNodeIdCache) {
-       
-      input.zip(nodeIds).sample(false,partitionSubsamplingRate,rng.nextLong()).mapPartitionsWithIndex{ (pID,points) =>  //
+       //.sample(false,partitionSubsamplingRate,rng.nextLong())
+      input.zip(nodeIds).mapPartitionsWithIndex{ (pID,points) =>  //
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
           val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
@@ -946,7 +961,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         nodeStatsAggregators.iterator.zipWithIndex.map(_.swap)
       }
     } else {
-      input.sample(false,partitionSubsamplingRate,rng.nextLong()).mapPartitionsWithIndex{(pID,points) => 
+        //.sample(false,partitionSubsamplingRate,rng.nextLong())
+      input.mapPartitionsWithIndex{(pID,points) => 
         // Construct a nodeStatsAggregators array to hold node aggregate stats,
         // each node will have a nodeStatsAggregator
         val nodeStatsAggregators = Array.tabulate(numNodes) { nodeIndex =>
