@@ -196,22 +196,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           //}
       }
   }
-   /*    
-
-  def updateLeafStats(nodeAgg : Array[Array[Double]], 
-                      dataPoint: Instance, topNodes : Array[LearningNode], 
-                      numTrees : Int) :  Array[Array[Double]] = {
-      var offset = 0
-      
-      for (treeIndex <- 0 until numTrees) {
-          offset = topNodes(treeIndex).getLeafIndex(dataPoint.features)
-          nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
-          nodeAgg(treeIndex)(offset*3 + 1) += dataPoint.label //update label sum 
-          nodeAgg(treeIndex)(offset*3 + 2) += dataPoint.label*dataPoint.label //update label 
-  } 
-      return nodeAgg
-}
-*/
+ 
   def updateBinnedLeafStats(nodeAgg : Array[Array[Double]], 
                       dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
                       numTrees : Int, bcSplits: Broadcast[Array[Array[Split]]]) :  Array[Array[Double]] = {
@@ -252,7 +237,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     
     
     
-  //def repopulator()
 /**
    * Train a random forest.
    *
@@ -447,28 +431,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         
    repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}
     }
-  /*    
-  else if(repopulate & !useBinned){
-     val numberOfLeaves = Array.fill[Int](numTrees)(0) 
-        
-    for (treeIndex <- 0 until numTrees) {
-        numberOfLeaves(treeIndex) = topNodes(treeIndex).getNumberOfLeaves
-    }
-      
-    val partitionAggregates = input.mapPartitions{points =>  //originally input
-        
-        
-        val treeAggregator = Array.tabulate(numTrees)(treeIndex => Array.fill[Double](numberOfLeaves(treeIndex)*3)(0.0))
-        points.foreach(updateLeafStats(treeAggregator,_,topNodes,numTrees))
-        treeAggregator.iterator.zipWithIndex.map(_.swap)}
-      
-       val repopulateStats =   partitionAggregates.reduceByKey((a, b) => a.zip(b).map { case (x, y) => x + y }).collectAsMap()
-       repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}
-  }
-*/
-      
-      
-   
+
       
     if (strategy.useNodeIdCache) {
       // Delete any remaining checkpoints used for node Id cache.
@@ -1635,11 +1598,15 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       // Choose subset of features for node (if subsampling).
       val featureSubset: Option[Array[Int]] = if (metadata.subsamplingFeatures) {
           if(metadata.featureWeight.reduceLeft(_ max _) == 0.0){ 
+              Some(SamplingUtils.reservoirSampleAndCount(Range(0,
+          metadata.numFeatures).iterator, metadata.numFeaturesPerNode, rng.nextLong())._1)
+              /**
               Some(reservoirWeightedSampling(    
                   Range(0,metadata.numFeatures).iterator,
                   metadata.numFeaturesPerNode,
                   metadata.featureWeight,
                   rng.nextLong())._1)
+                  **/
               }
           else{
           //a.reduceLeft(_ max _)
