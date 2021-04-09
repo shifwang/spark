@@ -180,18 +180,9 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
                 reservoir_map += (key1 -> item)
             }
           }
-            //if (key1 > reservoir_map.keysIterator.min &&  key1 > 0.0){
-             //   reservoir_map -= reservoir_map.keysIterator.min
-              //  reservoir_map += (key1 -> item)
-            //}
+
             i+= 1
           }
-            //println("Final Reservoir size  :" + reservoir_map.size)
-          //println(reservoir_map.values.toArray.mkString(" "))
-          //if(all_zero == 1){
-           //   return (reservoirWeightedSampling(input,k,weight,seed))
-          //}
-         // else{
           return (reservoir_map.values.toArray.slice(0,weight.length),weight.length)
           //}
       }
@@ -199,11 +190,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
  
   def updateBinnedLeafStats(nodeAgg : Array[Array[Double]], 
                       dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
-                      numTrees : Int, bcSplits: Broadcast[Array[Array[Split]]]) :  Array[Array[Double]] = {
+                      numTrees : Int, splits: Array[Array[Split]],
+                      treeToNodeIndexToLeafIndicesBc: Broadcast[scala.collection.mutable.Map[Int,Map[Int,Int]]]) :  Array[Array[Double]] = {
      
       var offset = 0
       for (treeIndex <- 0 until numTrees) {
-           offset = topNodes(treeIndex).getBinnedLeafIndex(dataPoint.datum, bcSplits.value)
+           val nodeId = topNodes(treeIndex).predictImpl(dataPoint.datum.binnedFeatures,splits)
+           val offset = treeToNodeIndexToLeafIndicesBc.value(treeIndex)(nodeId)
            val label = dataPoint.datum.label
            nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
            nodeAgg(treeIndex)(offset*3 + 1) += label //update label sum 
@@ -216,11 +209,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     
  def updateBinnedLeafStatsOOB(nodeAgg : Array[Array[Double]], 
                       dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
-                      numTrees : Int, bcSplits: Broadcast[Array[Array[Split]]]) :  Array[Array[Double]] = {
+                      numTrees : Int, splits: Array[Array[Split]],
+                        treeToNodeIndexToLeafIndicesBc: Broadcast[scala.collection.mutable.Map[Int,Map[Int,Int]]]) :  Array[Array[Double]] = {
       var offset = 0
       for (treeIndex <- 0 until numTrees) {
           if(dataPoint.subsampleCounts(treeIndex) == 0){
-                  offset = topNodes(treeIndex).getBinnedLeafIndex(dataPoint.datum, bcSplits.value)
+                  val nodeId = topNodes(treeIndex).predictImpl(dataPoint.datum.binnedFeatures,splits)
+                  val offset = treeToNodeIndexToLeafIndicesBc.value(treeIndex)(nodeId)
                   val label = dataPoint.datum.label
                   nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
                   nodeAgg(treeIndex)(offset*3 + 1) += label//update label sum 
@@ -401,32 +396,45 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
    Current issues: Implementation does not do certain trees at a time so might run into memory issues for very deep trees. Need to modify this but will do later... 
    */ 
       
-    if(repopulate & useBinned){   
+    //val memUsageForRepopulationPerNode = 8L*(2.0.toLong)
+    //val sizeOfGroup = maxMemoryUsage/memUsageForRepopulationPerNode
+    //print(sizeOfGroup)
+      
+    if(repopulate){   
         
         
     val numberOfLeaves = Array.fill[Int](numTrees)(0) 
-        
+    val treeToNodeIndexToLeafIndices = scala.collection.mutable.Map[Int,Map[Int,Int]]()
               
     for (treeIndex <- 0 until numTrees) {
-        numberOfLeaves(treeIndex) = topNodes(treeIndex).getNumberOfLeaves
+        val numberOfLeavesForTree = topNodes(treeIndex).getNumberOfLeaves
+        numberOfLeaves(treeIndex) = numberOfLeavesForTree
+        //println(topNodes(treeIndex).getLeafIds(scala.collection.mutable.Stack[Int]()).zipWithIndex.mkString(","))
+        treeToNodeIndexToLeafIndices += (treeIndex -> topNodes(treeIndex).getLeafIds(scala.collection.mutable.Stack[Int]()).zipWithIndex.toMap) 
     }
-    
+        val treeToNodeIndexToLeafIndicesBc = sc.broadcast(treeToNodeIndexToLeafIndices)
+        
+   
     val partitionAggregates = baggedInput.mapPartitions{points =>  //originally input
         
         
         val treeAggregator = Array.tabulate(numTrees)(treeIndex => Array.fill[Double](numberOfLeaves(treeIndex)*3)(0.0))
-        
+        //val repopulationStartTime = System.nanoTime
         if(useOOB){
                                                                                      
-        points.foreach(updateBinnedLeafStatsOOB(treeAggregator,_,topNodes,numTrees, bcSplits))} //originally updateLeafStats
+        points.foreach(updateBinnedLeafStatsOOB(treeAggregator,_,topNodes,numTrees,
+                                                bcSplits.value,treeToNodeIndexToLeafIndicesBc))} //originally updateLeafStats
         
         else{
-            points.foreach(updateBinnedLeafStats(treeAggregator,_,topNodes,numTrees, bcSplits))}
+            points.foreach(updateBinnedLeafStats(treeAggregator,_,topNodes,numTrees,
+                                                 bcSplits.value,treeToNodeIndexToLeafIndicesBc))}
            
         
         treeAggregator.iterator.zipWithIndex.map(_.swap)}
     
-      
+        //val repopulationElapsedTime = System.nanoTime - repopulationStartTime
+        //println(s"repopulation time = $repopulationElapsedTime")
+   val mapCollectStartTime = System.nanoTime
    val repopulateStats =   partitionAggregates.reduceByKey((a, b) => a.zip(b).map { case (x, y) => x + y }).collectAsMap()
         
    repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}

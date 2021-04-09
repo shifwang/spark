@@ -22,6 +22,7 @@ import org.apache.spark.mllib.tree.impurity.ImpurityCalculator
 import org.apache.spark.mllib.tree.impurity.VarianceCalculator
 import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.ml.feature.Instance
+import scala.collection.mutable
 import org.apache.spark.ml.tree.impl.TreePoint
 
 import org.apache.spark.mllib.tree.model.{ImpurityStats, InformationGainStats => OldInformationGainStats, Node => OldNode, Predict => OldPredict}
@@ -554,13 +555,33 @@ private[tree] class LearningNode(
                 
     
     def getNumberOfLeaves : Int = {
-         if(leftChild.isEmpty & rightChild.isEmpty) //Is a leaf Node
+         if(leftChild.isEmpty && rightChild.isEmpty) //Is a leaf Node
       {
           return 1; 
       }
         else{
             return leftChild.get.getNumberOfLeaves + rightChild.get.getNumberOfLeaves
         }
+    }
+    
+    def getLeafIds(leafIndices:scala.collection.mutable.Stack[Int]): scala.collection.mutable.Stack[Int] = {
+        if(leftChild.isEmpty && rightChild.isEmpty){
+            leafIndices.push(this.id)
+            return leafIndices
+        }
+        else{
+            if(!leftChild.isEmpty && rightChild.isEmpty){
+                leftChild.get.getLeafIds(leafIndices)
+            }
+            else if(leftChild.isEmpty && !rightChild.isEmpty){
+                rightChild.get.getLeafIds(leafIndices)
+            }
+            else{
+                val newLeafIndices = rightChild.get.getLeafIds(leafIndices)
+                leftChild.get.getLeafIds(newLeafIndices)
+            }
+        }
+    
     }
     
     def getBinnedLeafIndex(dataPoint : TreePoint,splits: Array[Array[Split]]) : Int = {
