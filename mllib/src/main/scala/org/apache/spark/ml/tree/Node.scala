@@ -583,7 +583,7 @@ private[tree] class LearningNode(
         }
     
     }
-    
+    /*
     def getBinnedLeafIndex(dataPoint : TreePoint,splits: Array[Array[Split]]) : Int = {
         var node = this
         var leafIndex = 0
@@ -603,6 +603,8 @@ private[tree] class LearningNode(
         }
         return leafIndex
     }
+    */
+    
     
 }
     

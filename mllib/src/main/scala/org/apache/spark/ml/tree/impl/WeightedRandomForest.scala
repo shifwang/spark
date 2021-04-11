@@ -188,7 +188,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       }
   }
  
-  def updateBinnedLeafStats(nodeAgg : Array[Array[Double]], 
+  def updateBinnedLeafStatsAll(nodeAgg : Array[Array[Double]], 
                       dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
                       numTrees : Int, splits: Array[Array[Split]],
                       treeToNodeIndexToLeafIndicesBc: Broadcast[scala.collection.mutable.Map[Int,Map[Int,Int]]]) :  Array[Array[Double]] = {
@@ -229,7 +229,26 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
  }
     
 
-    
+  def updateBinnedLeafStats(nodeAgg : Array[Array[Double]], 
+                      dataPoint: BaggedPoint[TreePoint], topNodes : Array[LearningNode], 
+                      numTrees : Int, splits: Array[Array[Split]],
+                        treeToNodeIndexToLeafIndicesBc: Broadcast[scala.collection.mutable.Map[Int,Map[Int,Int]]]) :  Array[Array[Double]] = {
+      var offset = 0
+      for (treeIndex <- 0 until numTrees) {
+          if(dataPoint.subsampleCounts(treeIndex) != 0){
+                  val nodeId = topNodes(treeIndex).predictImpl(dataPoint.datum.binnedFeatures,splits)
+                  val offset = treeToNodeIndexToLeafIndicesBc.value(treeIndex)(nodeId)
+                  val label = dataPoint.datum.label
+                  nodeAgg(treeIndex)(offset*3) += 1.0 //update count 
+                  nodeAgg(treeIndex)(offset*3 + 1) += label//update label sum 
+                  nodeAgg(treeIndex)(offset*3 + 2) += label*label //update label
+              
+              
+          }
+      }
+     
+     return nodeAgg
+ }
     
     
 /**
@@ -392,13 +411,9 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       
       
    /*  
-   Helps repopulate leaves. Does so by a) clearing the leaf node of all statistics. Then using treeInput to update aggregate statistics by creating an array treeAggregator of size (numTrees)(numLeavesPerTree) for each iterating and then iterating all instances in every partition to update statistics. Then a reduce by key operation is used to update statistics across partitions and then aggregate statistics is collected as map to driver to repopulate leaves
-   Current issues: Implementation does not do certain trees at a time so might run into memory issues for very deep trees. Need to modify this but will do later... 
+   Helps repopulate leaves. 
    */ 
       
-    //val memUsageForRepopulationPerNode = 8L*(2.0.toLong)
-    //val sizeOfGroup = maxMemoryUsage/memUsageForRepopulationPerNode
-    //print(sizeOfGroup)
       
     if(repopulate){   
         
@@ -409,12 +424,10 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     for (treeIndex <- 0 until numTrees) {
         val numberOfLeavesForTree = topNodes(treeIndex).getNumberOfLeaves
         numberOfLeaves(treeIndex) = numberOfLeavesForTree
+        val NodeIndexToLeafIndices = topNodes(treeIndex).getLeafIds(scala.collection.mutable.Stack[Int]()).zipWithIndex.toMap
         //println(topNodes(treeIndex).getLeafIds(scala.collection.mutable.Stack[Int]()).zipWithIndex.mkString(","))
-        treeToNodeIndexToLeafIndices += (treeIndex -> topNodes(treeIndex).getLeafIds(scala.collection.mutable.Stack[Int]()).zipWithIndex.toMap) 
-    }
-        val treeToNodeIndexToLeafIndicesBc = sc.broadcast(treeToNodeIndexToLeafIndices)
-        
-   
+        treeToNodeIndexToLeafIndices += (treeIndex -> NodeIndexToLeafIndices) }
+    val treeToNodeIndexToLeafIndicesBc = sc.broadcast(treeToNodeIndexToLeafIndices)
     val partitionAggregates = baggedInput.mapPartitions{points =>  //originally input
         
         
@@ -422,9 +435,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         //val repopulationStartTime = System.nanoTime
         if(useOOB){
                                                                                      
-        points.foreach(updateBinnedLeafStatsOOB(treeAggregator,_,topNodes,numTrees,
-                                                bcSplits.value,treeToNodeIndexToLeafIndicesBc))} //originally updateLeafStats
-        
+        points.foreach(updateBinnedLeafStatsAll(treeAggregator,_,topNodes,numTrees,
+                                                bcSplits.value,treeToNodeIndexToLeafIndicesBc))}
         else{
             points.foreach(updateBinnedLeafStats(treeAggregator,_,topNodes,numTrees,
                                                  bcSplits.value,treeToNodeIndexToLeafIndicesBc))}
@@ -1153,9 +1165,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     } else {
       node.stats
     }
-      
     
-      
+    
     //var gainAndImpurityStats: ImpurityStats = null
     
       
