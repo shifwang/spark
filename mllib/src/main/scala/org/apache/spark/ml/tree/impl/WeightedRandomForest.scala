@@ -446,10 +446,9 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     
         //val repopulationElapsedTime = System.nanoTime - repopulationStartTime
         //println(s"repopulation time = $repopulationElapsedTime")
-   val mapCollectStartTime = System.nanoTime
    val repopulateStats =   partitionAggregates.reduceByKey((a, b) => a.zip(b).map { case (x, y) => x + y }).collectAsMap()
         
-   repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulate(leafStatistics,0,numberOfLeaves(treeIndex))}
+   repopulateStats.foreach{case(treeIndex, leafStatistics) => topNodes(treeIndex).repopulateLeaves(leafStatistics,treeToNodeIndexToLeafIndices(treeIndex))} //repopulateLeaves(leafStatistics,0,numberOfLeaves(treeIndex)
     }
 
       
@@ -551,15 +550,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val trees = runBagged(baggedInput = baggedInput, metadata = metadata, bcSplits = bcSplits,
       strategy = strategy, numTrees = numTrees, featureSubsetStrategy = featureSubsetStrategy, dataSubSamplingRate = dataSubSamplingRate.last, partitionSubsamplingRate = partitionSubsamplingRate, repopulate = repopulate, useBinned = useBinned, useOOB = useOOB, 
       seed = seed, instr = instr, prune = prune, parentUID = parentUID)
-    /*
-     val tree0_iterator = trees(0).leafIterator(trees(0).rootNode)
-     while(tree0_iterator.hasNext){
-         val leaf = tree0_iterator.next()
-         leaf.prediction = 123123
-         println(leaf.prediction)
-     }
-     */
-      
+
     baggedInput.unpersist()
    
     bcSplits.destroy()
@@ -827,9 +818,8 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         splits: Array[Array[Split]],
         dataSubSamplingRate : Double,
         seed: Long): Array[DTStatsAggregator] = {
-         val subsampleRand = new XORShiftRandom(seed)
+         val subsampleRand = new XORShiftRandom(seed+Random.nextLong())
       treeToNodeToIndexInfo.foreach{ case (treeIndex, nodeIndexToInfo) =>
-          var consider = true // usually false, trying something... 
           val nodeIndex = 
           topNodesForGroup(treeIndex).predictImpl(baggedPoint.datum.binnedFeatures, splits)
           val numSamples =  baggedPoint.subsampleCounts(treeIndex)
@@ -862,7 +852,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         splits: Array[Array[Split]],
         dataSubSamplingRate : Double, 
         seed : Long ): Array[DTStatsAggregator] = {
-         val subsampleRand = new XORShiftRandom(seed)
+         val subsampleRand = new XORShiftRandom(seed+Random.nextLong())
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
         val baggedPoint = dataPoint._1
         val nodeIdCache = dataPoint._2
@@ -997,54 +987,34 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         val isLeaf =
           (stats.gain <= 0) || (LearningNode.indexToLevel(nodeIndex) == metadata.maxDepth)
         node.isLeaf = isLeaf
-        
         node.stats = stats
         logDebug(s"Node = $node")
         //LearningNode.emptyNode
-          
+        //println(node.stats.impurityCalculator.count)  
         if (!isLeaf) {
           node.split = Some(split)
           val childIsLeaf = (LearningNode.indexToLevel(nodeIndex) + 1) == metadata.maxDepth
           val leftChildIsLeaf = childIsLeaf || (math.abs(stats.leftImpurity) < Utils.EPSILON)
           val rightChildIsLeaf = childIsLeaf || (math.abs(stats.rightImpurity) < Utils.EPSILON)
-          if(rightChildIsLeaf & !leftChildIsLeaf){
-            node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),rightChildIsLeaf,             
-                    ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator))) 
-            node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
-           leftChildIsLeaf, null))
+          val leftChildIndex = LearningNode.leftChildIndex(nodeIndex)
+          val rightChildIndex = LearningNode.rightChildIndex(nodeIndex)
+          println(childIsLeaf.toString)
+          val leftChildNode : LearningNode = if(!leftChildIsLeaf){ LearningNode.apply(leftChildIndex,leftChildIsLeaf,null)}
+            else{
+              LearningNode.apply(leftChildIndex,leftChildIsLeaf,ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator))
           }
-          else if(leftChildIsLeaf& !rightChildIsLeaf ){
-              node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
-            leftChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
-              node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
-           rightChildIsLeaf, null))
-            
+          val rightChildNode : LearningNode = if(!rightChildIsLeaf){ LearningNode.apply(rightChildIndex,rightChildIsLeaf,null)}
+            else{
+              LearningNode.apply(rightChildIndex,rightChildIsLeaf,ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator))
           }
-          else if(rightChildIsLeaf & leftChildIsLeaf){
-              node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),leftChildIsLeaf,         
-                ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
-               node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),rightChildIsLeaf,             
-                    ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator))) 
-            
-          }
-          else{
-               node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
-           leftChildIsLeaf, null))
-               node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
-           rightChildIsLeaf, null))
-              
-          }
-              
-          
-          
-          //node.leftChild = Some(LearningNode.emptyNode(LearningNode.leftChildIndex(nodeIndex)))
-          //node.leftChild.isLeaf = leftChildIsLeaf
-          //node.rightChild =  Some(LearningNode.emptyNode(LearningNode.rightChildIndex(nodeIndex)))
-          //node.rightChild = 
-          //node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
-           // leftChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
-          //node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
-           // rightChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator)))
+          node.leftChild = Some(leftChildNode)
+          node.leftChild.get.isLeaf = leftChildIsLeaf
+          node.rightChild = Some(rightChildNode)
+          node.rightChild.get.isLeaf = rightChildIsLeaf
+   
+         
+
+     
           if (outputBestSplits) {
             val bestSplitsInTree = bestSplits(treeIndex)
             if (bestSplitsInTree == null) {
@@ -1094,21 +1064,27 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       rightImpurityCalculator: ImpurityCalculator,
       metadata: DecisionTreeMetadata): ImpurityStats = {
 
-      
+    /*
     val parentImpurityCalculator: ImpurityCalculator = if (stats == null) {
       leftImpurityCalculator.copy.add(rightImpurityCalculator)
     } else {
       stats.impurityCalculator
     }
-    
-   
-      
+         
     val impurity: Double = if (stats == null) {
       parentImpurityCalculator.calculate()
     } else {
-        parentImpurityCalculator.calculate()
+       parentImpurityCalculator.calculate()
       //stats.impurity
     }
+    
+   */
+    
+    val parentImpurityCalculator: ImpurityCalculator = leftImpurityCalculator.copy.add(rightImpurityCalculator)
+      
+    val impurity: Double = parentImpurityCalculator.calculate()
+   
+   
 
     val leftRawCount = leftImpurityCalculator.rawCount
     val rightRawCount = rightImpurityCalculator.rawCount
@@ -1116,6 +1092,17 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val rightCount = rightImpurityCalculator.count
 
     val totalCount = leftCount + rightCount
+    var parentCount = 0.0
+    if(stats != null){
+        val parentSize = stats.impurityCalculator.count
+        //println(s"parent node count = $parentSize")
+    }
+    else{
+        parentCount = totalCount
+    }
+    //println(s"total child count = $totalCount")
+    //println(s"parent total count = $parentCount")
+
 
     val violatesMinInstancesPerNode = (leftRawCount < metadata.minInstancesPerNode) ||
       (rightRawCount < metadata.minInstancesPerNode)
@@ -1160,14 +1147,15 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     // Calculate InformationGain and ImpurityStats if current node is top node
    
     val level = LearningNode.indexToLevel(node.id)
+    /*
     var gainAndImpurityStats: ImpurityStats = if (level == 0) {
       null
     } else {
       node.stats
     }
+    */
     
-    
-    //var gainAndImpurityStats: ImpurityStats = null
+    var gainAndImpurityStats: ImpurityStats = null
     
       
       
@@ -1206,13 +1194,14 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
               val rightChildStats =
                 binAggregates.getImpurityCalculator(nodeFeatureOffset, numSplits)
               rightChildStats.subtract(leftChildStats)
-              gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats,
+              gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats, // original code is gainAndImpurityStats
                 leftChildStats, rightChildStats, binAggregates.metadata)
               (splitIdx, gainAndImpurityStats)
             }.maxBy(_._2.gain)
           (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
         } else if (binAggregates.metadata.isUnordered(featureIndex)) {
           // Unordered categorical feature
+            println("unordered categorical feature")
           val leftChildOffset = binAggregates.getFeatureOffset(featureIndexIdx)
           val (bestFeatureSplitIndex, bestFeatureGainStats) =
             Range(0, numSplits).map { splitIndex =>
@@ -1226,6 +1215,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
         } else {
           // Ordered categorical feature
+             println("ordered categorical feature")
           val nodeFeatureOffset = binAggregates.getFeatureOffset(featureIndexIdx)
           val numCategories = binAggregates.metadata.numBins(featureIndex)
 
@@ -1703,3 +1693,48 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     }
   }
 }
+
+
+/*
+          if(rightChildIsLeaf && !leftChildIsLeaf){
+            print("right child is leaf,left child is not leaf ")
+            node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),true,             
+                    ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator))) 
+            node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
+           false, null))
+          }
+          else if(leftChildIsLeaf && !rightChildIsLeaf ){
+              print("left child is leaf,right child is not leaf ")
+              node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
+            true, ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
+              node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
+           false, null))
+            
+          }
+          else if(rightChildIsLeaf && leftChildIsLeaf){
+              print("left child is leaf,right child is leaf ")
+              node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),true,         
+                ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
+               node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),true,             
+                    ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator))) 
+            
+          }
+          else{
+               node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
+           false, null))
+               node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
+           false, null))
+              
+          }
+*/
+
+
+ //println(s"left Child index =  $leftChildIndex")
+          //println(s"right Child index = $rightChildIndex")
+            /*
+            node.leftChild = Some(LearningNode(LearningNode.leftChildIndex(nodeIndex),
+            leftChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
+          node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
+            rightChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator)))
+            */
+          
