@@ -998,7 +998,6 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           val rightChildIsLeaf = childIsLeaf || (math.abs(stats.rightImpurity) < Utils.EPSILON)
           val leftChildIndex = LearningNode.leftChildIndex(nodeIndex)
           val rightChildIndex = LearningNode.rightChildIndex(nodeIndex)
-          println(childIsLeaf.toString)
           val leftChildNode : LearningNode = if(!leftChildIsLeaf){ LearningNode.apply(leftChildIndex,leftChildIsLeaf,null)}
             else{
               LearningNode.apply(leftChildIndex,leftChildIsLeaf,ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator))
