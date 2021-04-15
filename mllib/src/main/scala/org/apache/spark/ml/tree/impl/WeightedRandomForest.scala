@@ -817,8 +817,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         baggedPoint: BaggedPoint[TreePoint],
         splits: Array[Array[Split]],
         dataSubSamplingRate : Double,
-        seed: Long): Array[DTStatsAggregator] = {
-         val subsampleRand = new XORShiftRandom(seed+Random.nextLong())
+        subsampleRand: XORShiftRandom): Array[DTStatsAggregator] = {
       treeToNodeToIndexInfo.foreach{ case (treeIndex, nodeIndexToInfo) =>
           val nodeIndex = 
           topNodesForGroup(treeIndex).predictImpl(baggedPoint.datum.binnedFeatures, splits)
@@ -851,8 +850,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
         dataPoint: (BaggedPoint[TreePoint], Array[Int]), 
         splits: Array[Array[Split]],
         dataSubSamplingRate : Double, 
-        seed : Long ): Array[DTStatsAggregator] = {
-         val subsampleRand = new XORShiftRandom(seed+Random.nextLong())
+        subsampleRand : XORShiftRandom): Array[DTStatsAggregator] = {
       treeToNodeToIndexInfo.foreach { case (treeIndex, nodeIndexToInfo) =>
         val baggedPoint = dataPoint._1
         val nodeIdCache = dataPoint._2
@@ -927,8 +925,10 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           }
           new DTStatsAggregator(metadata, featuresForNode)
         }
+         val seed = rng.nextLong()+ pID.toLong + 1L
+         val subsampleRand = new XORShiftRandom(seed)
         // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value,dataSubSamplingRate, rng.nextLong()+ pID.toLong + 1L)) //dataSubSamplingRate
+        points.foreach(binSeqOpWithNodeIdCache(nodeStatsAggregators,_, bcSplits.value,dataSubSamplingRate,subsampleRand))
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
         nodeStatsAggregators.iterator.zipWithIndex.map(_.swap)
@@ -944,8 +944,10 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           }
           new DTStatsAggregator(metadata, featuresForNode)
         }
+         val seed = rng.nextLong()+ pID.toLong + 1L
+         val subsampleRand = new XORShiftRandom(seed)
          // iterator all instances in current partition and update aggregate stats
-        points.foreach(binSeqOp(nodeStatsAggregators, _, bcSplits.value,dataSubSamplingRate,rng.nextLong() + pID.toLong + 1L ))
+        points.foreach(binSeqOp(nodeStatsAggregators, _, bcSplits.value,dataSubSamplingRate,subsampleRand))
         // transform nodeStatsAggregators array to (nodeIndex, nodeAggregateStats) pairs,
         // which can be combined with other partition using `reduceByKey`
         nodeStatsAggregators.iterator.zipWithIndex.map(_.swap)
@@ -1063,7 +1065,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
       rightImpurityCalculator: ImpurityCalculator,
       metadata: DecisionTreeMetadata): ImpurityStats = {
 
-    /*
+    
     val parentImpurityCalculator: ImpurityCalculator = if (stats == null) {
       leftImpurityCalculator.copy.add(rightImpurityCalculator)
     } else {
@@ -1073,15 +1075,13 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val impurity: Double = if (stats == null) {
       parentImpurityCalculator.calculate()
     } else {
-       parentImpurityCalculator.calculate()
-      //stats.impurity
+      stats.impurity
     }
     
-   */
-    
-    val parentImpurityCalculator: ImpurityCalculator = leftImpurityCalculator.copy.add(rightImpurityCalculator)
+  
+    //val parentImpurityCalculator: ImpurityCalculator = leftImpurityCalculator.copy.add(rightImpurityCalculator)
       
-    val impurity: Double = parentImpurityCalculator.calculate()
+    //val impurity: Double = parentImpurityCalculator.calculate()
    
    
 
@@ -1089,19 +1089,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
     val rightRawCount = rightImpurityCalculator.rawCount
     val leftCount = leftImpurityCalculator.count
     val rightCount = rightImpurityCalculator.count
-
     val totalCount = leftCount + rightCount
-    var parentCount = 0.0
-    if(stats != null){
-        val parentSize = stats.impurityCalculator.count
-        //println(s"parent node count = $parentSize")
-    }
-    else{
-        parentCount = totalCount
-    }
-    //println(s"total child count = $totalCount")
-    //println(s"parent total count = $parentCount")
-
 
     val violatesMinInstancesPerNode = (leftRawCount < metadata.minInstancesPerNode) ||
       (rightRawCount < metadata.minInstancesPerNode)
@@ -1145,7 +1133,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
 
     // Calculate InformationGain and ImpurityStats if current node is top node
    
-    val level = LearningNode.indexToLevel(node.id)
+    //val level = LearningNode.indexToLevel(node.id)
     /*
     var gainAndImpurityStats: ImpurityStats = if (level == 0) {
       null
@@ -1193,14 +1181,14 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
               val rightChildStats =
                 binAggregates.getImpurityCalculator(nodeFeatureOffset, numSplits)
               rightChildStats.subtract(leftChildStats)
-              gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats, // original code is gainAndImpurityStats
+              gainAndImpurityStats = calculateImpurityStats(gainAndImpurityStats, 
                 leftChildStats, rightChildStats, binAggregates.metadata)
               (splitIdx, gainAndImpurityStats)
             }.maxBy(_._2.gain)
           (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
         } else if (binAggregates.metadata.isUnordered(featureIndex)) {
           // Unordered categorical feature
-            println("unordered categorical feature")
+            //println("unordered categorical feature")
           val leftChildOffset = binAggregates.getFeatureOffset(featureIndexIdx)
           val (bestFeatureSplitIndex, bestFeatureGainStats) =
             Range(0, numSplits).map { splitIndex =>
@@ -1214,7 +1202,7 @@ private[spark] object WeightedRandomForest extends Logging with Serializable {
           (splits(featureIndex)(bestFeatureSplitIndex), bestFeatureGainStats)
         } else {
           // Ordered categorical feature
-             println("ordered categorical feature")
+             //println("ordered categorical feature")
           val nodeFeatureOffset = binAggregates.getFeatureOffset(featureIndexIdx)
           val numCategories = binAggregates.metadata.numBins(featureIndex)
 
