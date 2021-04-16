@@ -690,7 +690,6 @@ private[spark] object RandomForest extends Logging with Serializable {
         val (split: Split, stats: ImpurityStats) =
           nodeToBestSplits(aggNodeIndex)
         logDebug(s"best split = $split")
-
         // Extract info for this node.  Create children if not leaf.
         val isLeaf =
           (stats.gain <= 0) || (LearningNode.indexToLevel(nodeIndex) == metadata.maxDepth)
@@ -707,7 +706,6 @@ private[spark] object RandomForest extends Logging with Serializable {
             leftChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.leftImpurityCalculator)))
           node.rightChild = Some(LearningNode(LearningNode.rightChildIndex(nodeIndex),
             rightChildIsLeaf, ImpurityStats.getEmptyImpurityStats(stats.rightImpurityCalculator)))
-
           if (outputBestSplits) {
             val bestSplitsInTree = bestSplits(treeIndex)
             if (bestSplitsInTree == null) {
@@ -716,6 +714,8 @@ private[spark] object RandomForest extends Logging with Serializable {
               bestSplitsInTree.update(nodeIndex, split)
             }
           }
+            
+    
 
           // enqueue left child and right child if they are not leaves
           if (!leftChildIsLeaf) {

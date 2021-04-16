@@ -469,10 +469,10 @@ private[tree] class LearningNode(
               impurity = (1.0/count)*(sumSquared - ((1.0)/count)*(sum*sum))
             }
             this.stats = new ImpurityStats(Double.NaN, impurity, new
-            VarianceCalculator(repopulatedStats,count.toLong),null, null)
+            VarianceCalculator(repopulatedStats,count.toLong),null, null,true)
             }
        }
-    
+ 
     def repopulateLeaves(leafStats:Array[Double],nodeIndexToLeafIndices : Map[Int,Int]) : Unit = {
         val rootNode = this
         nodeIndexToLeafIndices.foreach{case(nodeIndex, leafIndex) => 
@@ -490,7 +490,6 @@ private[tree] class LearningNode(
                 VarianceCalculator(repopulatedStats,count.toLong),null, null,true)
             }
               }
- 
     def getNumberOfLeaves : Int = {
          if(leftChild.isEmpty && rightChild.isEmpty) //Is a leaf Node
       {
